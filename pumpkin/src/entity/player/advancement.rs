@@ -101,6 +101,30 @@ impl AdvancementProgress {
         }
         self.requirements = requirements;
     }
+
+    #[must_use]
+    #[inline]
+    pub fn get_remaining_criteria(&self) -> impl Iterator<Item = &str> {
+        self.criteria.iter().filter_map(|(id,criterion)|
+            if criterion.is_done() {
+                None
+            }else {
+                Some(id)
+            }
+        )
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn get_completed_criteria(&self) -> impl Iterator<Item = &str> {
+        self.criteria.iter().filter_map(|(id,criterion)|
+            if criterion.is_done() {
+                Some(id)
+            }else {
+                None
+            }
+        )
+    }
 }
 
 #[derive(Clone, Default)]
@@ -147,14 +171,14 @@ impl AdvancementProgressMap {
 ///
 /// This handles saving, loading, and tracking the state of granted / revoked advancements.
 pub struct PlayerAdvancement {
-    progress: AdvancementProgressMap,
-    is_first_packet: bool,
-    roots_to_update: HashSet<&'static AdvancementNode>,
-    visible: HashSet<&'static Advancement>,
-    progress_changed: HashSet<&'static Advancement>,
-    manager: Arc<AdvancementManager>,
-    path: PathBuf,
-    last_selected_tab: Option<&'static Advancement>,
+    pub progress: AdvancementProgressMap,
+    pub is_first_packet: bool,
+    pub roots_to_update: HashSet<&'static AdvancementNode>,
+    pub visible: HashSet<&'static Advancement>,
+    pub progress_changed: HashSet<&'static Advancement>,
+    pub manager: Arc<AdvancementManager>,
+    pub path: PathBuf,
+    pub last_selected_tab: Option<&'static Advancement>,
     /// A weak reference to the player who owns these advancements.
     pub player: Weak<Player>,
 }
