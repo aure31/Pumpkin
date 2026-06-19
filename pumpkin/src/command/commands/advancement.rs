@@ -1,25 +1,25 @@
-use crate::command::argument_builder::{ArgumentBuilder, argument, command, literal};
+use crate::command::argument_builder::{argument, command, literal, ArgumentBuilder};
+use crate::command::argument_types::core::string::StringArgumentType;
 use crate::command::argument_types::entity::EntityArgumentType;
-use crate::command::argument_types::resource_key::{ADVANCEMENT_REGISTRY, ResourceKeyArgument};
+use crate::command::argument_types::resource_key::{ResourceKeyArgument, ADVANCEMENT_REGISTRY};
 use crate::command::context::command_context::CommandContext;
 use crate::command::context::command_source::CommandSource;
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
-use crate::entity::EntityBase;
-use crate::entity::player::Player;
-use pumpkin_data::advancement_data::AdvancementNode;
-use pumpkin_data::{ADVANCEMENT_TREE, Advancement, translation};
-use pumpkin_util::PermissionLvl;
-use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
-use pumpkin_util::text::TextComponent;
-use std::sync::Arc;
-use pumpkin_data::translation::java::{COMMANDS_ADVANCEMENT_GRANT_ONE_TO_MANY_FAILURE, COMMANDS_ADVANCEMENT_GRANT_ONE_TO_MANY_SUCCESS};
-use crate::command::argument_types::core::string::StringArgumentType;
 use crate::command::suggestion::provider::{SuggestionProvider, SuggestionProviderResult};
 use crate::command::suggestion::suggestions::SuggestionsBuilder;
 use crate::entity::player::advancement::PlayerAdvancement;
+use crate::entity::player::Player;
+use crate::entity::EntityBase;
+use futures::future::join_all;
+use pumpkin_data::advancement_data::AdvancementNode;
+use pumpkin_data::{translation, Advancement, ADVANCEMENT_TREE};
+use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
+use pumpkin_util::text::TextComponent;
+use pumpkin_util::PermissionLvl;
+use std::sync::Arc;
 
 const NAME: &str = "advancement";
 const DESCRIPTION: &str = "manage advancement of the player";
@@ -88,15 +88,15 @@ const ERROR_REVOKE_CRITERION_TO_MANY_FAILURE: CommandErrorType<3> = CommandError
 );
 
 #[derive(Clone, Copy)]
-enum Action {
+pub enum Action {
     Grant,
     Revoke,
 }
 
 impl Action {
-    /// inner function that directly take the locked PlayerAdvancement
+    /// inner function that directly take the locked `PlayerAdvancement`
     fn perform_single_inner(
-        &self,
+        self,
         guard: &mut PlayerAdvancement,
         advancement: &'static Advancement,
     ) -> bool {
@@ -106,9 +106,9 @@ impl Action {
                 if progress.is_done() {
                     return false;
                 }
-                let criteria: Vec<_> = progress.get_remaining_criteria().collect();
+                let criteria: Vec<Arc<str>> = progress.get_remaining_criteria().collect();
                 for criterion in criteria {
-                    guard.award(advancement, criterion);
+                    guard.award(advancement, &criterion);
                 }
                 true
             }
@@ -116,23 +116,13 @@ impl Action {
                 if !progress.is_done() {
                     return false;
                 }
-                let criteria: Vec<_> = progress.get_completed_criteria().collect();
+                let criteria: Vec<Arc<str>> = progress.get_completed_criteria().collect();
                 for criterion in criteria {
-                    guard.revoke(advancement, criterion);
+                    guard.revoke(advancement, &criterion);
                 }
                 true
             }
         }
-    }
-
-    // unary call to perform for a single advancement
-    async fn perform_single(
-        &self,
-        player: &Arc<Player>,
-        advancement: &'static Advancement,
-    ) -> bool {
-        let mut guard = player.advancements.lock().await;
-        self.perform_single_inner(&mut guard, advancement)
     }
 
     // Appel groupé — un seul lock pour tout
@@ -167,7 +157,7 @@ impl Action {
         count
     }
 
-    async fn perform_criterion(&self,player: Player, advancement: &'static Advancement, criterion : &str) -> bool {
+    async fn perform_criterion(&self,player: &Arc<Player>, advancement: &'static Advancement, criterion : &str) -> bool {
         let mut guard = player.advancements.lock().await;
         match self {
             Self::Grant => {
@@ -260,9 +250,9 @@ async fn perform(
     show_advancement: bool,
 ) -> Result<i32, CommandSyntaxError> {
     let mut i = 0;
-    for player in &targets {
+    for player in targets {
         i += action
-            .perform(player, &advancements, show_advancement)
+            .perform(player, advancements, show_advancement)
             .await;
     }
     if i == 0 {
@@ -357,32 +347,29 @@ async fn perform(
     Ok(i)
 }
 
-#[allow(unused_must_use)]
 pub async fn perform_criterion(
     context: Arc<CommandSource>,
-    targets: Vec<Arc<Player>>,
+    targets: &[Arc<Player>],
     action: Action,
     advancement: &'static Advancement,
     criterion: &str,
 ) -> Result<i32, CommandSyntaxError> {
-    if !advancement.criteria().containsKey(criterion) {
-        Err(ERROR_CRITERION_NOT_FOUND.create_without_context(advancement.name()))
-    }
-    else {
-        let mut count = 0;
-        for player in &targets {
-            if action.perform_criterion(player,advancement,criterion) {
-                count+=1;
-            }
-        }
+    if advancement.criteria.contains(&criterion) {
+        let count = join_all(
+            targets.iter().map(|player| action.perform_criterion(player, advancement, criterion))
+        )
+            .await
+            .into_iter()
+            .filter(|&success| success)
+            .count() as i32;
         if count == 0 {
-            if let [first_player] = targets.as_slice() {
+            if let [first_player] = targets {
                 Err(match action {
                     Action::Grant => &ERROR_GRANT_CRITERION_TO_ONE_FAILURE,
                     Action::Revoke => &ERROR_REVOKE_CRITERION_TO_ONE_FAILURE,
                 }
                     .create_without_context_args_slice(&[
-                        criterion,
+                        TextComponent::text(criterion.to_owned()),
                         advancement.name(),
                         first_player.get_display_name().await,
                     ]))
@@ -392,41 +379,44 @@ pub async fn perform_criterion(
                     Action::Revoke => &ERROR_REVOKE_CRITERION_TO_MANY_FAILURE,
                 }
                     .create_without_context_args_slice(&[
-                        criterion,
+                        TextComponent::text(criterion.to_owned()),
                         advancement.name(),
                         TextComponent::text(targets.len().to_string()),
                     ]))
             }
         } else {
-            let translate = if let [first_player] = targets.as_slice() {
-                    TextComponent::translate(
-                        format!(
-                            "{}.criterion.to.one.success",
-                            action.get_key()
-                        ),
-                        [
-                            criterion,
-                            advancement.name(),
-                            first_player.get_display_name().await,
-                        ],
-                    )
-                } else {
-                    TextComponent::translate(
-                        format!(
-                            "{}.criterion.to.many.success",
-                            action.get_key()
-                        ),
-                        [
-                            criterion,
-                            advancement.name(),
-                            TextComponent::text(targets.len().to_string()),
-                        ]
-                    )
-                };
-            context.send_feedback(translate,true).await;
+            let translate = if let [first_player] = targets {
+                TextComponent::translate(
+                    format!(
+                        "{}.criterion.to.one.success",
+                        action.get_key()
+                    ),
+                    [
+                        TextComponent::text(criterion.to_owned()),
+                        advancement.name(),
+                        first_player.get_display_name().await,
+                    ],
+                )
+            } else {
+                TextComponent::translate(
+                    format!(
+                        "{}.criterion.to.many.success",
+                        action.get_key()
+                    ),
+                    [
+                        TextComponent::text(criterion.to_owned()),
+                        advancement.name(),
+                        TextComponent::text(targets.len().to_string()),
+                    ]
+                )
+            };
+            context.send_feedback(translate, true).await;
             Ok(count)
         }
+    } else {
+        Err(ERROR_CRITERION_NOT_FOUND.create_without_context(advancement.name(),TextComponent::text(criterion.to_owned())))
     }
+
 }
 
 struct OnlyAdvancementCriterionExecutor {
@@ -439,7 +429,7 @@ impl CommandExecutor for OnlyAdvancementCriterionExecutor {
         Box::pin(async move {
             perform_criterion(
                 context.source.clone(),
-                EntityArgumentType::get_players(context, ARG_TARGETS).await?,
+                &EntityArgumentType::get_players(context, ARG_TARGETS).await?,
                 action,
                ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)?,
                 StringArgumentType::get(context, ARG_CRITERION)?,
@@ -478,12 +468,9 @@ impl SuggestionProvider for CriterionSuggestionProvider {
     fn suggest<'a>(&'a self, context: &'a CommandContext, mut builder: SuggestionsBuilder) -> SuggestionProviderResult<'a> {
         Box::pin(async move {
             let suggestion = ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)
-                .ok()
-                .map(|adv| adv.requirements.iter().flatten())
-                .into_iter()
-                .flatten();
+                .ok().map(|adv| adv.criteria).into_iter().flatten();
             for suggest in suggestion {
-                builder = builder.suggest(suggest);
+                builder = builder.suggest(*suggest);
             }
             builder.build()
         })

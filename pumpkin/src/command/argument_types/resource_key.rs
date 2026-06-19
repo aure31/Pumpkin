@@ -51,7 +51,7 @@ impl ArgumentType for ResourceKeyArgument {
         }
     }
 
-    fn client_side_parser(&'_ self) -> JavaClientArgumentType {
+    fn client_side_parser(&self) -> JavaClientArgumentType {
         JavaClientArgumentType::ResourceKey {
             identifier: self.0.clone(),
         }

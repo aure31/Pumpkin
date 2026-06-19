@@ -233,7 +233,18 @@ pub struct AdvancementStruct {
     #[serde(default, rename = "sends_telemetry_event")]
     pub sends_telemetry: bool,
     pub requirements: Vec<Vec<String>>,
+    #[serde(deserialize_with = "deserialize_first_key")]
+    pub criteria : Vec<String>,
 }
+
+fn deserialize_first_key<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let map = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
+    Ok(map.into_keys().collect())
+}
+
 #[derive(Clone)]
 pub struct AdvancementHolder(Identifier, AdvancementStruct);
 
@@ -423,6 +434,7 @@ pub(crate) fn build() -> TokenStream {
         let requirements = advancement.requirements.iter().map(|inner_req| {
             quote! { &[#(#inner_req),*]}
         });
+        let criteria = advancement.criteria;
         variants.extend([quote! {
             pub const #format_name: &Self = &Self {
                 id: Identifier::vanilla_static(#raw_name),
@@ -431,6 +443,7 @@ pub(crate) fn build() -> TokenStream {
                 display : #display,
                 reward : &#reward,
                 requirements: &[#(#requirements),*],
+                criteria: &[#(#criteria),*],
             };
         }]);
         let minecraft_name = identifier.to_string();
@@ -463,6 +476,7 @@ pub(crate) fn build() -> TokenStream {
             pub display : Option<&'static AdvancementDisplay>,
             pub reward : &'static AdvancementReward,
             pub requirements: &'static[&'static[&'static str]],
+            pub criteria: &'static[&'static str],
         }
 
         impl Display for Advancement {

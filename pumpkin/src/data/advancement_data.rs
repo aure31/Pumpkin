@@ -36,7 +36,7 @@ impl AdvancementManager {
     #[must_use]
     #[inline]
     pub fn get_advancements(&self) -> Vec<Identifier> {
-        Advancement::get_list().to_vec()
+        Advancement::get_identifier_list().to_vec()
     }
 
     /// Creates and returns a new instance of `PlayerAdvancement` with the configured path.

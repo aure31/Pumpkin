@@ -97,6 +97,7 @@ impl FrameType {
     }
 }
 
+#[derive(Clone)]
 pub struct AdvancementReward {
     pub experience: i32,
     pub recipes: &'static [ItemRecipe],

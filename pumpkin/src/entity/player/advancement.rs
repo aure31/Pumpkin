@@ -102,33 +102,19 @@ impl AdvancementProgress {
         self.requirements = requirements;
     }
 
-    #[must_use]
     #[inline]
-    pub fn get_remaining_criteria(&self) -> impl Iterator<Item = &str> {
-        self.criteria.iter().filter_map(|(id,criterion)|
-            if criterion.is_done() {
-                None
-            }else {
-                Some(id)
-            }
-        )
+    pub fn get_remaining_criteria(&self) -> impl Iterator<Item = Arc<str>> {
+        self.criteria.iter().filter(|&(_id,criterion)| !criterion.is_done()).map(|(id,_criterion)| id.clone())
     }
 
-    #[must_use]
     #[inline]
-    pub fn get_completed_criteria(&self) -> impl Iterator<Item = &str> {
-        self.criteria.iter().filter_map(|(id,criterion)|
-            if criterion.is_done() {
-                Some(id)
-            }else {
-                None
-            }
-        )
+    pub fn get_completed_criteria(&self) -> impl Iterator<Item = Arc<str>> {
+        self.criteria.iter().filter(|&(_id,criterion)| criterion.is_done()).map(|(id,_criterion)| id.clone())
     }
 }
 
 #[derive(Clone, Default)]
-struct AdvancementProgressMap {
+pub struct AdvancementProgressMap {
     pub map: IndexMap<&'static Advancement, AdvancementProgress>,
 }
 
@@ -155,11 +141,13 @@ impl AdvancementProgressMap {
         self.map.insert(advancement, progress);
     }
 
+    #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
+    #[must_use]
     #[inline]
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
@@ -286,7 +274,7 @@ impl PlayerAdvancement {
     }
 
     /// Grants the rewards (like experience) associated with completing an advancement.
-    pub fn grant_reward(player: Arc<Player>, reward: &AdvancementReward) {
+    pub fn grant_reward(player: Arc<Player>, reward: &'static AdvancementReward) {
         tokio::spawn(async move {
             tokio::join!(
                 player.add_experience_points(reward.experience),
@@ -299,7 +287,7 @@ impl PlayerAdvancement {
     pub fn award(&mut self, advancement: &'static Advancement, criterion: &str) -> bool {
         //TODO call and creates Events for plugins
         let mut result = false;
-        let player = self.player.upgrade().unwrap().clone();
+        let player = self.player.upgrade().unwrap();
         let progress = self.progress.get_mut_or_start_progress(advancement);
         let was_done = progress.is_done();
         if !progress.grant_progress(criterion) {
