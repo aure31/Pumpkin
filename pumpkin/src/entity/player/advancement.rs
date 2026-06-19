@@ -286,12 +286,17 @@ impl PlayerAdvancement {
     }
 
     /// Grants the rewards (like experience) associated with completing an advancement.
-    pub async fn grant_reward(player: Arc<Player>, reward: &AdvancementReward) {
-        player.add_experience_points(reward.experience).await;
+    pub fn grant_reward(player: Arc<Player>, reward: &AdvancementReward) {
+        tokio::spawn(async move {
+            tokio::join!(
+                player.add_experience_points(reward.experience),
+                // more reward later
+            );
+        });
     }
 
-    /// Fully awards an advancement to the player, updating its status to complete and granting rewards if applicable.
-    pub async fn award(&mut self, advancement: &'static Advancement, criterion: &str) -> bool {
+    /// award a criterion of an advancement to the player, updating its status to complete and granting rewards if applicable.
+    pub fn award(&mut self, advancement: &'static Advancement, criterion: &str) -> bool {
         //TODO call and creates Events for plugins
         let mut result = false;
         let player = self.player.upgrade().unwrap().clone();
@@ -301,7 +306,7 @@ impl PlayerAdvancement {
             result = true;
             self.progress_changed.insert(advancement);
             if !was_done && progress.is_done() {
-                Self::grant_reward(player.clone(), advancement.reward).await;
+                Self::grant_reward(player.clone(), advancement.reward);
                 if let Some(display) = advancement.display
                     && display.announce_to_chat
                     && player
@@ -311,15 +316,17 @@ impl PlayerAdvancement {
                         .game_rules
                         .show_advancement_messages
                 {
-                    let component = TextComponent::translate_cross(
-                        display.frame_type.get_translation(),
-                        translation::bedrock::CHAT_TYPE_ACHIEVEMENT,
-                        [player.get_display_name().await, advancement.name()],
-                    );
-                    player
-                        .world()
-                        .broadcast_system_message(&component, false)
-                        .await; //send translate component for the event
+                    tokio::spawn(async move {
+                        let component = TextComponent::translate_cross(
+                            display.frame_type.get_translation(),
+                            translation::bedrock::CHAT_TYPE_ACHIEVEMENT,
+                            [player.get_display_name().await, advancement.name()],
+                        );
+                        player
+                            .world()
+                            .broadcast_system_message(&component, false)
+                            .await; //send translate component for the event
+                    });
                 }
             }
         }

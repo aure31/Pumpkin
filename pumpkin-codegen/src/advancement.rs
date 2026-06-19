@@ -387,6 +387,7 @@ pub(crate) fn build() -> TokenStream {
     let mut name_to_type = TokenStream::new();
     let mut minecraft_name_to_type = TokenStream::new();
     let mut minecraft_namespaces = TokenStream::new();
+    let mut advancement_list = TokenStream::new();
     let capacity = advancements.len();
     //construct the tree
     let mut tree = AdvancementTree::default();
@@ -399,11 +400,10 @@ pub(crate) fn build() -> TokenStream {
     let advancement_tree = quote! {
         pub static ADVANCEMENT_TREE : LazyLock<AdvancementTree> = #tree;
     };
-    let advancements_holder: Vec<AdvancementHolder> = tree
+    let advancements_holder = tree
         .nodes_vector
         .into_iter()
-        .map(|node| node.value)
-        .collect();
+        .map(|node| node.value);
     for AdvancementHolder(identifier, advancement) in advancements_holder {
         let raw_name = identifier.path();
         let format_name = format_ident!("{}", raw_name.to_shouty_snake_case());
@@ -437,7 +437,8 @@ pub(crate) fn build() -> TokenStream {
 
         name_to_type.extend(quote! { #raw_name => Some(Self::#format_name), });
         minecraft_name_to_type.extend(quote! { #minecraft_name => Some(Self::#format_name), });
-        minecraft_namespaces.extend(quote! { Identifier::vanilla_static(#raw_name),})
+        minecraft_namespaces.extend(quote! { Identifier::vanilla_static(#raw_name),});
+        advancement_list.extend(quote! {Self::#format_name, });
     }
 
     quote! {
@@ -521,7 +522,11 @@ pub(crate) fn build() -> TokenStream {
                 }
             }
 
-            pub const fn get_list() -> [Identifier;#capacity] {
+            pub fn get_advancements_list() -> [&'static Advancement; #capacity] {
+                [#advancement_list]
+            }
+
+            pub const fn get_identifier_list() -> [Identifier;#capacity] {
                 [#minecraft_namespaces]
             }
 
