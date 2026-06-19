@@ -104,12 +104,18 @@ impl AdvancementProgress {
 
     #[inline]
     pub fn get_remaining_criteria(&self) -> impl Iterator<Item = Arc<str>> {
-        self.criteria.iter().filter(|&(_id,criterion)| !criterion.is_done()).map(|(id,_criterion)| id.clone())
+        self.criteria
+            .iter()
+            .filter(|&(_id, criterion)| !criterion.is_done())
+            .map(|(id, _criterion)| id.clone())
     }
 
     #[inline]
     pub fn get_completed_criteria(&self) -> impl Iterator<Item = Arc<str>> {
-        self.criteria.iter().filter(|&(_id,criterion)| criterion.is_done()).map(|(id,_criterion)| id.clone())
+        self.criteria
+            .iter()
+            .filter(|&(_id, criterion)| criterion.is_done())
+            .map(|(id, _criterion)| id.clone())
     }
 }
 

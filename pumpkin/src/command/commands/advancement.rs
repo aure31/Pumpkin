@@ -1,7 +1,7 @@
-use crate::command::argument_builder::{argument, command, literal, ArgumentBuilder};
+use crate::command::argument_builder::{ArgumentBuilder, argument, command, literal};
 use crate::command::argument_types::core::string::StringArgumentType;
 use crate::command::argument_types::entity::EntityArgumentType;
-use crate::command::argument_types::resource_key::{ResourceKeyArgument, ADVANCEMENT_REGISTRY};
+use crate::command::argument_types::resource_key::{ADVANCEMENT_REGISTRY, ResourceKeyArgument};
 use crate::command::context::command_context::CommandContext;
 use crate::command::context::command_source::CommandSource;
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
@@ -10,15 +10,15 @@ use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
 use crate::command::suggestion::provider::{SuggestionProvider, SuggestionProviderResult};
 use crate::command::suggestion::suggestions::SuggestionsBuilder;
-use crate::entity::player::advancement::PlayerAdvancement;
-use crate::entity::player::Player;
 use crate::entity::EntityBase;
+use crate::entity::player::Player;
+use crate::entity::player::advancement::PlayerAdvancement;
 use futures::future::join_all;
 use pumpkin_data::advancement_data::AdvancementNode;
-use pumpkin_data::{translation, Advancement, ADVANCEMENT_TREE};
+use pumpkin_data::{ADVANCEMENT_TREE, Advancement, translation};
+use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
-use pumpkin_util::PermissionLvl;
 use std::sync::Arc;
 
 const NAME: &str = "advancement";
@@ -135,42 +135,44 @@ impl Action {
         let mut guard = player.advancements.lock().await;
         if !show_advancement {
             /*TODO player
-                .advancements
-                .lock()
-                .await
-                .flush_dirty(player, true)
-                .await;*/
+            .advancements
+            .lock()
+            .await
+            .flush_dirty(player, true)
+            .await;*/
         }
 
-        let count = advancements.iter()
+        let count = advancements
+            .iter()
             .filter(|advancement| self.perform_single_inner(&mut guard, advancement))
             .count() as i32;
 
         if !show_advancement {
             /*TODO player
-                .advancements
-                .lock()
-                .await
-                .flush_dirty(player, true)
-                .await;*/
+            .advancements
+            .lock()
+            .await
+            .flush_dirty(player, true)
+            .await;*/
         }
         count
     }
 
-    async fn perform_criterion(&self,player: &Arc<Player>, advancement: &'static Advancement, criterion : &str) -> bool {
+    async fn perform_criterion(
+        &self,
+        player: &Arc<Player>,
+        advancement: &'static Advancement,
+        criterion: &str,
+    ) -> bool {
         let mut guard = player.advancements.lock().await;
         match self {
-            Self::Grant => {
-                guard.award(advancement, criterion)
-            }
-            Self::Revoke => {
-                guard.revoke(advancement, criterion)
-            }
+            Self::Grant => guard.award(advancement, criterion),
+            Self::Revoke => guard.revoke(advancement, criterion),
         }
     }
 
     const fn get_key(&self) -> &str {
-         match self {
+        match self {
             Self::Grant => "commands.advancement.grant",
             Self::Revoke => "commands.advancement.revoke",
         }
@@ -251,9 +253,7 @@ async fn perform(
 ) -> Result<i32, CommandSyntaxError> {
     let mut i = 0;
     for player in targets {
-        i += action
-            .perform(player, advancements, show_advancement)
-            .await;
+        i += action.perform(player, advancements, show_advancement).await;
     }
     if i == 0 {
         return if let [first_advancement] = advancements[..] {
@@ -298,52 +298,40 @@ async fn perform(
     }
     let translate = if let [first_advancement] = advancements[..] {
         if let [first_player] = targets {
-                    TextComponent::translate(
-                        format!(
-                            "{}.one.to.one.success",
-                            action.get_key()
-                        ),
-                        [
-                            first_advancement.name(),
-                            first_player.get_display_name().await,
-                        ],
-                    )
+            TextComponent::translate(
+                format!("{}.one.to.one.success", action.get_key()),
+                [
+                    first_advancement.name(),
+                    first_player.get_display_name().await,
+                ],
+            )
         } else {
             TextComponent::translate(
-                format!(
-                    "{}.one.to.many.success",
-                    action.get_key()
-                ),
+                format!("{}.one.to.many.success", action.get_key()),
                 [
                     first_advancement.name(),
                     TextComponent::text(targets.len().to_string()),
-                ]
+                ],
             )
         }
-        } else if let [first] = targets {
-            TextComponent::translate(
-                format!(
-                    "{}.many.to.one.success",
-                    action.get_key()
-                ),
-                [
-                    TextComponent::text(advancements.len().to_string()),
-                    first.get_display_name().await,
-                ],
-            )
-        } else {
-            TextComponent::translate(
-                format!(
-                    "{}.many.to.many.success",
-                    action.get_key()
-                ),
-                [
-                    TextComponent::text(advancements.len().to_string()),
-                    TextComponent::text(targets.len().to_string()),
-                ],
-            )
-        };
-    context.send_feedback(translate,true).await;
+    } else if let [first] = targets {
+        TextComponent::translate(
+            format!("{}.many.to.one.success", action.get_key()),
+            [
+                TextComponent::text(advancements.len().to_string()),
+                first.get_display_name().await,
+            ],
+        )
+    } else {
+        TextComponent::translate(
+            format!("{}.many.to.many.success", action.get_key()),
+            [
+                TextComponent::text(advancements.len().to_string()),
+                TextComponent::text(targets.len().to_string()),
+            ],
+        )
+    };
+    context.send_feedback(translate, true).await;
     Ok(i)
 }
 
@@ -356,41 +344,40 @@ pub async fn perform_criterion(
 ) -> Result<i32, CommandSyntaxError> {
     if advancement.criteria.contains(&criterion) {
         let count = join_all(
-            targets.iter().map(|player| action.perform_criterion(player, advancement, criterion))
+            targets
+                .iter()
+                .map(|player| action.perform_criterion(player, advancement, criterion)),
         )
-            .await
-            .into_iter()
-            .filter(|&success| success)
-            .count() as i32;
+        .await
+        .into_iter()
+        .filter(|&success| success)
+        .count() as i32;
         if count == 0 {
             if let [first_player] = targets {
                 Err(match action {
                     Action::Grant => &ERROR_GRANT_CRITERION_TO_ONE_FAILURE,
                     Action::Revoke => &ERROR_REVOKE_CRITERION_TO_ONE_FAILURE,
                 }
-                    .create_without_context_args_slice(&[
-                        TextComponent::text(criterion.to_owned()),
-                        advancement.name(),
-                        first_player.get_display_name().await,
-                    ]))
+                .create_without_context_args_slice(&[
+                    TextComponent::text(criterion.to_owned()),
+                    advancement.name(),
+                    first_player.get_display_name().await,
+                ]))
             } else {
                 Err(match action {
                     Action::Grant => &ERROR_GRANT_CRITERION_TO_MANY_FAILURE,
                     Action::Revoke => &ERROR_REVOKE_CRITERION_TO_MANY_FAILURE,
                 }
-                    .create_without_context_args_slice(&[
-                        TextComponent::text(criterion.to_owned()),
-                        advancement.name(),
-                        TextComponent::text(targets.len().to_string()),
-                    ]))
+                .create_without_context_args_slice(&[
+                    TextComponent::text(criterion.to_owned()),
+                    advancement.name(),
+                    TextComponent::text(targets.len().to_string()),
+                ]))
             }
         } else {
             let translate = if let [first_player] = targets {
                 TextComponent::translate(
-                    format!(
-                        "{}.criterion.to.one.success",
-                        action.get_key()
-                    ),
+                    format!("{}.criterion.to.one.success", action.get_key()),
                     [
                         TextComponent::text(criterion.to_owned()),
                         advancement.name(),
@@ -399,24 +386,23 @@ pub async fn perform_criterion(
                 )
             } else {
                 TextComponent::translate(
-                    format!(
-                        "{}.criterion.to.many.success",
-                        action.get_key()
-                    ),
+                    format!("{}.criterion.to.many.success", action.get_key()),
                     [
                         TextComponent::text(criterion.to_owned()),
                         advancement.name(),
                         TextComponent::text(targets.len().to_string()),
-                    ]
+                    ],
                 )
             };
             context.send_feedback(translate, true).await;
             Ok(count)
         }
     } else {
-        Err(ERROR_CRITERION_NOT_FOUND.create_without_context(advancement.name(),TextComponent::text(criterion.to_owned())))
+        Err(ERROR_CRITERION_NOT_FOUND.create_without_context(
+            advancement.name(),
+            TextComponent::text(criterion.to_owned()),
+        ))
     }
-
 }
 
 struct OnlyAdvancementCriterionExecutor {
@@ -431,14 +417,15 @@ impl CommandExecutor for OnlyAdvancementCriterionExecutor {
                 context.source.clone(),
                 &EntityArgumentType::get_players(context, ARG_TARGETS).await?,
                 action,
-               ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)?,
+                ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)?,
                 StringArgumentType::get(context, ARG_CRITERION)?,
-            ).await
+            )
+            .await
         })
     }
 }
 
-struct AdvancementExecutor{
+struct AdvancementExecutor {
     action: Action,
     mode: Mode,
 }
@@ -457,7 +444,7 @@ impl CommandExecutor for AdvancementExecutor {
                     mode,
                 ),
             )
-                .await
+            .await
         })
     }
 }
@@ -465,10 +452,17 @@ impl CommandExecutor for AdvancementExecutor {
 struct CriterionSuggestionProvider;
 
 impl SuggestionProvider for CriterionSuggestionProvider {
-    fn suggest<'a>(&'a self, context: &'a CommandContext, mut builder: SuggestionsBuilder) -> SuggestionProviderResult<'a> {
+    fn suggest<'a>(
+        &'a self,
+        context: &'a CommandContext,
+        mut builder: SuggestionsBuilder,
+    ) -> SuggestionProviderResult<'a> {
         Box::pin(async move {
             let suggestion = ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)
-                .ok().map(|adv| adv.criteria).into_iter().flatten();
+                .ok()
+                .map(|adv| adv.criteria)
+                .into_iter()
+                .flatten();
             for suggest in suggestion {
                 builder = builder.suggest(*suggest);
             }
@@ -481,7 +475,6 @@ struct EveryAdvancementExecutor {
     action: Action,
 }
 
-
 impl CommandExecutor for EveryAdvancementExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
         let action = self.action;
@@ -491,9 +484,9 @@ impl CommandExecutor for EveryAdvancementExecutor {
                 &EntityArgumentType::get_players(context, ARG_TARGETS).await?,
                 action,
                 &Advancement::get_advancements_list(),
-                false
+                false,
             )
-                .await
+            .await
         })
     }
 }
@@ -507,44 +500,67 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &mut PermissionReg
     macro_rules! build_action {
         ($name:expr, $action:expr) => {
             literal($name).then(
-                argument(ARG_TARGETS, EntityArgumentType::Players).then(
-                    literal("only").then(
-                        argument(
-                            ARG_ADVANCEMENT,
-                            ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
-                        )
-                        .executes(AdvancementExecutor { action: $action, mode: Mode::Only})
-                        .then(argument(ARG_CRITERION, StringArgumentType::SingleWord)
-                            .suggests(CriterionSuggestionProvider)
-                            .executes(OnlyAdvancementCriterionExecutor {
-                                action: $action
-                            })),
+                argument(ARG_TARGETS, EntityArgumentType::Players)
+                    .then(
+                        literal("only").then(
+                            argument(
+                                ARG_ADVANCEMENT,
+                                ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
+                            )
+                            .executes(AdvancementExecutor {
+                                action: $action,
+                                mode: Mode::Only,
+                            })
+                            .then(
+                                argument(ARG_CRITERION, StringArgumentType::SingleWord)
+                                    .suggests(CriterionSuggestionProvider)
+                                    .executes(OnlyAdvancementCriterionExecutor { action: $action }),
+                            ),
+                        ),
+                    )
+                    .then(
+                        literal("from").then(
+                            argument(
+                                ARG_ADVANCEMENT,
+                                ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
+                            )
+                            .executes(AdvancementExecutor {
+                                action: $action,
+                                mode: Mode::From,
+                            }),
+                        ),
+                    )
+                    .then(
+                        literal("until").then(
+                            argument(
+                                ARG_ADVANCEMENT,
+                                ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
+                            )
+                            .executes(AdvancementExecutor {
+                                action: $action,
+                                mode: Mode::Until,
+                            }),
+                        ),
+                    )
+                    .then(
+                        literal("through").then(
+                            argument(
+                                ARG_ADVANCEMENT,
+                                ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
+                            )
+                            .executes(AdvancementExecutor {
+                                action: $action,
+                                mode: Mode::Through,
+                            }),
+                        ),
+                    )
+                    .then(
+                        literal("everything")
+                            .executes(EveryAdvancementExecutor { action: $action }),
                     ),
-                ).then(literal("from").then(
-                    argument(
-                            ARG_ADVANCEMENT,
-                            ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
-                        )
-                    .executes(AdvancementExecutor { action: $action, mode: Mode::From })
-                ))
-                .then(literal("until").then(
-                    argument(
-                            ARG_ADVANCEMENT,
-                            ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
-                        )
-                    .executes(AdvancementExecutor { action: $action, mode: Mode::Until })
-                )).then(literal("through").then(
-                    argument(
-                            ARG_ADVANCEMENT,
-                            ResourceKeyArgument(ADVANCEMENT_REGISTRY.clone()),
-                        )
-                    .executes(AdvancementExecutor { action: $action, mode: Mode::Through })
-                )).then(literal("everything")
-                    .executes(EveryAdvancementExecutor { action: $action})
-                ),
             )
-    };
-}
+        };
+    }
 
     dispatcher.register(
         command(NAME, DESCRIPTION)
