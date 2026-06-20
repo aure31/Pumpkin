@@ -455,19 +455,15 @@ impl SuggestionProvider for CriterionSuggestionProvider {
     fn suggest<'a>(
         &'a self,
         context: &'a CommandContext,
-        mut builder: SuggestionsBuilder,
+        builder: SuggestionsBuilder,
     ) -> SuggestionProviderResult<'a> {
-        Box::pin(async move {
-            let suggestion = ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)
-                .ok()
-                .map(|adv| adv.criteria)
-                .into_iter()
-                .flatten();
-            for suggest in suggestion {
-                builder = builder.suggest(*suggest);
-            }
-            builder.build()
-        })
+        let suggestion = ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)
+            .ok()
+            .map(|adv| adv.criteria)
+            .into_iter()
+            .flatten()
+            .map(ToString::to_string);
+        Box::pin(async move { builder.filter_and_suggest_iter(suggestion).build() })
     }
 }
 
@@ -512,7 +508,7 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &mut PermissionReg
                                 mode: Mode::Only,
                             })
                             .then(
-                                argument(ARG_CRITERION, StringArgumentType::SingleWord)
+                                argument(ARG_CRITERION, StringArgumentType::GreedyPhrase)
                                     .suggests(CriterionSuggestionProvider)
                                     .executes(OnlyAdvancementCriterionExecutor { action: $action }),
                             ),

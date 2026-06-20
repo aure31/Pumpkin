@@ -7,12 +7,14 @@ use pumpkin_data::{Advancement, translation};
 use pumpkin_util::text::TextComponent;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::{from_reader, to_writer_pretty};
+use serde_json::to_string_pretty;
 use std::collections::{HashMap, HashSet};
-use std::fs::create_dir_all;
+use std::fs::{create_dir_all, read, write};
 use std::path::PathBuf;
+use std::str::from_utf8;
 use std::sync::{Arc, Weak};
 use std::time::SystemTime;
+use tokio::task::spawn_blocking;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -210,6 +212,7 @@ impl PlayerAdvancement {
 
     /// Returns whether advancement saving is enabled for this player.
     #[must_use]
+    #[inline]
     pub fn is_save_enabled(&self) -> bool {
         self.manager.save_enabled
     }
@@ -227,41 +230,32 @@ impl PlayerAdvancement {
     }
 
     /// Saves the player's advancement progress to disk as JSON.
-    pub fn save(&self) -> Result<(), AdvancementDataError> {
-        if !self.is_save_enabled() {
-            return Ok(());
-        }
-
-        if let Some(parent) = &self.path.parent()
-            && let Err(e) = create_dir_all(parent)
-        {
-            let file_name = self
-                .path
-                .file_prefix()
-                .and_then(|prefix| prefix.to_str())
-                .unwrap_or("unknown");
-            error!(
-                "Failed to create player advancement directory for {}: {e}",
-                file_name
-            );
-            return Err(AdvancementDataError::Io(e));
-        }
-        let file = std::fs::File::create(&self.path).map_err(AdvancementDataError::Io)?;
-
-        to_writer_pretty(file, &self).map_err(AdvancementDataError::Json)?;
-        Ok(())
+    pub async fn save(&self) -> Result<(), AdvancementDataError> {
+        let json = to_string_pretty(self).map_err(AdvancementDataError::Json)?;
+        let path = self.path.clone();
+        spawn_blocking(move || {
+            if let Err(e) = create_dir_all(path.parent().unwrap()) {
+                error!("Failed to create player advancement directory : {e}");
+                return Err(AdvancementDataError::Io(e));
+            }
+            write(path, json).map_err(AdvancementDataError::Io)
+        })
+        .await
+        .expect("spawn_blocking task panicked")
     }
 
     /// Loads the player's advancement progress from disk.
-    pub fn load(&mut self) -> Result<(), AdvancementDataError> {
+    pub async fn load(&mut self) -> Result<(), AdvancementDataError> {
         if !self.path.exists() {
             return Ok(());
         }
 
-        let file = std::fs::File::open(&self.path).map_err(AdvancementDataError::Io)?;
+        let json = spawn_blocking(|| read(&self.path).map_err(AdvancementDataError::Io))
+            .await
+            .expect("spawn_blocking task panicked")?;
 
         let loaded_data: HashMap<String, AdvancementProgress> =
-            from_reader(file).map_err(AdvancementDataError::Json)?;
+            serde_json::from_str(from_utf8(&json).unwrap()).map_err(AdvancementDataError::Json)?;
 
         self.progress.clear();
         for (advancement_id, mut progress) in loaded_data {
@@ -296,7 +290,7 @@ impl PlayerAdvancement {
         let player = self.player.upgrade().unwrap();
         let progress = self.progress.get_mut_or_start_progress(advancement);
         let was_done = progress.is_done();
-        if !progress.grant_progress(criterion) {
+        if progress.grant_progress(criterion) {
             result = true;
             self.progress_changed.insert(advancement);
             if !was_done && progress.is_done() {
@@ -436,8 +430,8 @@ mod tests {
         assert!(!pa.progress.get_mut_or_start_progress(adv).is_done());
     }
 
-    #[test]
-    fn save_advancement_progress() {
+    #[tokio::test]
+    async fn save_advancement_progress() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
         let id = Uuid::new_v4();
@@ -451,7 +445,7 @@ mod tests {
         };
 
         // Save should succeed
-        assert!(pa.save().is_ok(), "Save should succeed");
+        assert!(pa.save().await.is_ok(), "Save should succeed");
 
         // File should exist
         assert!(pa.path.exists(), "Saved file should exist");
@@ -463,8 +457,8 @@ mod tests {
             serde_json::from_str(&content).expect("Saved content should be valid JSON");
     }
 
-    #[test]
-    fn save_disabled() {
+    #[tokio::test]
+    async fn save_disabled() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), false));
         let id = Uuid::new_v4();
@@ -479,7 +473,7 @@ mod tests {
 
         // Save should return Ok but not actually save
         assert!(
-            pa.save().is_ok(),
+            pa.save().await.is_ok(),
             "Save with disabled saving should return Ok"
         );
         assert!(
@@ -488,8 +482,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn load_nonexistent_file() {
+    #[tokio::test]
+    async fn load_nonexistent_file() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
         let id = Uuid::new_v4();
@@ -497,14 +491,14 @@ mod tests {
 
         // Load from nonexistent file should return Ok (not error)
         assert!(
-            pa.load().is_ok(),
+            pa.load().await.is_ok(),
             "Loading from nonexistent file should return Ok"
         );
         assert!(pa.progress.is_empty(), "Advancements should remain empty");
     }
 
-    #[test]
-    fn load_advancement_progress() {
+    #[tokio::test]
+    async fn load_advancement_progress() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
 
@@ -519,7 +513,7 @@ mod tests {
         std::fs::write(&pa.path, data.to_string()).unwrap();
 
         // Load the file
-        assert!(pa.load().is_ok(), "Load should succeed");
+        assert!(pa.load().await.is_ok(), "Load should succeed");
 
         // Verify the advancement was loaded
         let loaded_progress = pa.progress.get_mut_or_start_progress(adv);
@@ -529,8 +523,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn save_load_roundtrip() {
+    #[tokio::test]
+    async fn save_load_roundtrip() {
         let temp_dir = tempdir().unwrap();
 
         // Create and save advancements
@@ -544,7 +538,7 @@ mod tests {
             progress_mut.grant_progress("crafting_table");
         };
 
-        assert!(pa.save().is_ok(), "Save should succeed");
+        assert!(pa.save().await.is_ok(), "Save should succeed");
 
         // Load the saved advancements into a new instance
         let mut pa_loaded = PlayerAdvancement::new(manager, id);
@@ -563,8 +557,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn load_invalid_advancement_id() {
+    #[tokio::test]
+    async fn load_invalid_advancement_id() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
 
@@ -588,7 +582,7 @@ mod tests {
         // Load should still succeed but skip the invalid entry
 
         assert!(
-            pa.load().is_ok(),
+            pa.load().await.is_ok(),
             "Load should succeed even with invalid IDs"
         );
         assert!(
@@ -597,8 +591,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn save_multiple_advancements() {
+    #[tokio::test]
+    async fn save_multiple_advancements() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
         let id = Uuid::new_v4();
@@ -617,7 +611,7 @@ mod tests {
             progress_mut2.grant_progress("entered_nether");
         };
 
-        assert!(pa.save().is_ok(), "Save should succeed");
+        assert!(pa.save().await.is_ok(), "Save should succeed");
 
         // Verify both were saved
         let content = std::fs::read_to_string(&pa.path).unwrap();
