@@ -865,9 +865,7 @@ pub(crate) fn build() -> TokenStream {
                 send_telemetry : #send_telemetry,
                 display : #display,
                 reward : &#reward,
-                requirements: AdvancementRequirement{
-                    requirements : &[#(#requirements),*]
-                }
+                requirements: &[#(#requirements),*],
             };
         }]);
         let minecraft_name = identifier.to_string();
@@ -898,7 +896,7 @@ pub(crate) fn build() -> TokenStream {
             pub send_telemetry : bool,
             pub display : Option<&'static AdvancementDisplay>,
             pub reward : &'static AdvancementReward,
-            pub requirements: AdvancementRequirement,
+            pub requirements: &'static[&'static[&'static str]],
         }
 
         impl Display for Advancement {
