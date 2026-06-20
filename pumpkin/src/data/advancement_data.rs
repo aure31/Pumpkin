@@ -52,10 +52,10 @@ impl AdvancementManager {
         &self,
         players: &[Arc<Player>],
     ) -> Result<(), AdvancementDataError> {
-        let mut to_write = Vec::with_capacity(players.len());
         if !self.save_enabled {
             return Ok(());
         }
+        let mut to_write = Vec::with_capacity(players.len());
         for player in players {
             let guard = player.advancements.lock().await;
             let json = serde_json::to_string_pretty(&*guard).map_err(AdvancementDataError::Json)?;
