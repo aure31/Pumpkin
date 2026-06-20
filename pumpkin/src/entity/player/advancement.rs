@@ -543,7 +543,7 @@ mod tests {
 
         // Load the saved advancements into a new instance
         let mut pa_loaded = PlayerAdvancement::new(manager, id);
-        assert!(pa_loaded.load().is_ok(), "Load should succeed");
+        assert!(pa_loaded.load().await.is_ok(), "Load should succeed");
 
         // Verify the loaded data matches the saved data
         let loaded_progress = pa_loaded.progress.get_mut_or_start_progress(adv);
