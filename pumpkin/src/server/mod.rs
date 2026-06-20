@@ -514,7 +514,7 @@ impl Server {
         let player = Arc::new(player);
         {
             let mut advancements = player.advancements.lock().await;
-            if let Err(e) = advancements.load() {
+            if let Err(e) = advancements.load().await {
                 warn!("Error loading player {}: {e}", player.gameprofile.id);
             }
             advancements.player = Arc::downgrade(&player);

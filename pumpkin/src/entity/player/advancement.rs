@@ -218,7 +218,7 @@ impl PlayerAdvancement {
     }
 
     ///reload the advancements from the file
-    pub fn reload(&mut self) -> Result<(), AdvancementDataError> {
+    pub async fn reload(&mut self) -> Result<(), AdvancementDataError> {
         //self.stopListening(); TODO
         self.progress.clear();
         self.visible.clear();
@@ -226,7 +226,7 @@ impl PlayerAdvancement {
         self.progress_changed.clear();
         self.is_first_packet = true;
         self.last_selected_tab = None;
-        self.load()
+        self.load().await
     }
 
     /// Saves the player's advancement progress to disk as JSON.
@@ -250,7 +250,8 @@ impl PlayerAdvancement {
             return Ok(());
         }
 
-        let json = spawn_blocking(|| read(&self.path).map_err(AdvancementDataError::Io))
+        let path = self.path.clone();
+        let json = spawn_blocking(|| read(path).map_err(AdvancementDataError::Io))
             .await
             .expect("spawn_blocking task panicked")?;
 
