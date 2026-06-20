@@ -231,6 +231,9 @@ impl PlayerAdvancement {
 
     /// Saves the player's advancement progress to disk as JSON.
     pub async fn save(&self) -> Result<(), AdvancementDataError> {
+        if !self.is_save_enabled() {
+            return Ok(());
+        }
         let json = to_string_pretty(self).map_err(AdvancementDataError::Json)?;
         let path = self.path.clone();
         spawn_blocking(move || {
