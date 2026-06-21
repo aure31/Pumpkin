@@ -304,18 +304,6 @@ async fn perform_and_show(
 /// - Whether one or many players were targeted
 /// - Whether one or many advancements were involved
 /// - The type of action (Grant or Revoke)
-///
-/// # Example
-///
-/// ```rust
-/// let result = perform(
-///     context,
-///     &[player],
-///     Action::Grant,
-///     &[advancement1, advancement2],
-///     true
-/// ).await;
-/// ```
 async fn perform(
     context: Arc<CommandSource>,
     targets: &[Arc<Player>],
