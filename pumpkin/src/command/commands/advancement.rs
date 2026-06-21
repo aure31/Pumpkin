@@ -22,7 +22,7 @@ use pumpkin_util::text::TextComponent;
 use std::sync::Arc;
 
 const NAME: &str = "advancement";
-const DESCRIPTION: &str = "manage advancement of the player";
+const DESCRIPTION: &str = "manage advancement of players";
 const PERMISSION: &str = "minecraft:command.advancement";
 
 const ARG_TARGETS: &str = "targets";
@@ -94,7 +94,7 @@ pub enum Action {
 }
 
 impl Action {
-    /// inner function that directly take the locked `PlayerAdvancement`
+    /// inner function that directly take the locked [`PlayerAdvancement`]
     fn perform_single_inner(
         self,
         guard: &mut PlayerAdvancement,
@@ -125,7 +125,22 @@ impl Action {
         }
     }
 
-    // Appel groupé — un seul lock pour tout
+    /// Performs the action (grant or revoke) on multiple advancements for a single player.
+    ///
+    /// This method applies the current action to each advancement in the provided slice for the
+    /// specified player. It locks the player's advancements and processes each advancement
+    /// sequentially, collecting the count of successful operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `player` - The player whose advancements will be modified
+    /// * `advancements` - A slice of advancements to apply the action to
+    /// * `show_advancement` - A flag to control advancement notification display (currently unused)
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of advancements successfully modified. An advancement is counted as
+    /// successful if [`perform_single_inner`] returns `true`
     async fn perform(
         &self,
         player: &Arc<Player>,
@@ -152,7 +167,7 @@ impl Action {
             .advancements
             .lock()
             .await
-            .flush_dirty(player, true)
+            .flush_dirty(player, false)
             .await;*/
         }
         count
@@ -171,6 +186,7 @@ impl Action {
         }
     }
 
+    /// return the corresponding key of the action
     const fn get_key(&self) -> &str {
         match self {
             Self::Grant => "commands.advancement.grant",
@@ -204,6 +220,26 @@ impl Mode {
     }
 }
 
+/// Retrieves a collection of advancements based on the target advancement and traversal mode.
+///
+/// This function builds a list of advancements by traversing the advancement tree according to
+/// the specified mode. The traversal can include parent advancements, child advancements, or both,
+/// depending on the mode selected.
+///
+/// # Arguments
+///
+/// * `target` - The advancement to use as the starting point for traversal
+/// * `mode` - The traversal mode that determines which advancements to include:
+///   - `Mode::Only` - Returns only the target advancement
+///   - `Mode::From` - Returns the target and all its descendants
+///   - `Mode::Until` - Returns the target and all its ancestors
+///   - `Mode::Through` - Returns the target and both ancestors and descendants
+///   - `Mode::Everything` - Returns the target and all ancestors and descendants (never used)
+///
+/// # Returns
+///
+/// A vector of references to advancements matching the specified mode. If the target advancement
+/// is not found in the tree, a vector containing only the target is returned.
 fn get_advancements(target: &Advancement, mode: Mode) -> Vec<&Advancement> {
     let tree = &ADVANCEMENT_TREE;
     let target_node = tree.get_node_from_id(&target.id);
@@ -234,6 +270,7 @@ fn add_children(parent: &AdvancementNode, output: &mut Vec<&Advancement>) {
     }
 }
 
+#[inline]
 async fn perform_and_show(
     context: Arc<CommandSource>,
     players: &[Arc<Player>],
@@ -243,7 +280,42 @@ async fn perform_and_show(
     perform(context, players, action, advancements, true).await
 }
 
-#[allow(clippy::too_many_lines)]
+/// Performs a batch action (grant or revoke) on multiple advancements for multiple players.
+///
+/// This function iterates through each player and applies the specified action to all provided
+/// advancements. It automatically handles error messaging based on the number of players and
+/// advancements involved, as well as the number of successful operations.
+///
+/// # Arguments
+///
+/// * `context` - The command source context used to send feedback messages to the command executor
+/// * `targets` - Slice of players who will be affected by the action
+/// * `action` - The action to perform on each advancement (Grant or Revoke)
+/// * `advancements` - Slice of advancements to apply the action to
+/// * `show_advancement` - Whether to show advancement notifications to players (currently unused)
+///
+/// # Returns
+///
+/// Returns `Ok(i)` with the total count of successful operations if at least one advancement
+/// was successfully modified for at least one player.
+///
+/// Returns `Err` with an appropriate localized error message if no operations succeeded. The
+/// error message varies based on:
+/// - Whether one or many players were targeted
+/// - Whether one or many advancements were involved
+/// - The type of action (Grant or Revoke)
+///
+/// # Example
+///
+/// ```rust
+/// let result = perform(
+///     context,
+///     &[player],
+///     Action::Grant,
+///     &[advancement1, advancement2],
+///     true
+/// ).await;
+/// ```
 async fn perform(
     context: Arc<CommandSource>,
     targets: &[Arc<Player>],
@@ -335,6 +407,26 @@ async fn perform(
     Ok(i)
 }
 
+/// Performs an action (grant or revoke) on a specific advancement criterion for multiple players.
+///
+/// This function attempts to apply the specified action to a criterion of an advancement for each
+/// of the given players. It handles error reporting based on the number of successful operations
+/// and provides feedback to the command source.
+///
+/// # Arguments
+///
+/// * `context` - The command source context for sending feedback
+/// * `targets` - The players to apply the action to
+/// * `action` - The action to perform (Grant or Revoke)
+/// * `advancement` - The advancement containing the criterion
+/// * `criterion` - The specific criterion name to operate on
+///
+/// # Returns
+///
+/// Returns `Ok(count)` with the number of successful operations if at least one succeeded.
+/// Returns `Err` with an appropriate error message if:
+/// - The criterion doesn't exist in the advancement
+/// - No operations succeeded
 pub async fn perform_criterion(
     context: Arc<CommandSource>,
     targets: &[Arc<Player>],
@@ -405,6 +497,7 @@ pub async fn perform_criterion(
     }
 }
 
+/// use for when a criterion is specified to on grant/revoke this criterion
 struct OnlyAdvancementCriterionExecutor {
     action: Action,
 }
@@ -425,6 +518,7 @@ impl CommandExecutor for OnlyAdvancementCriterionExecutor {
     }
 }
 
+/// use to grant/revoke advancement depending on the selected `mode`
 struct AdvancementExecutor {
     action: Action,
     mode: Mode,
@@ -449,6 +543,7 @@ impl CommandExecutor for AdvancementExecutor {
     }
 }
 
+/// suggest the corresponding criterion of the specified advancement
 struct CriterionSuggestionProvider;
 
 impl SuggestionProvider for CriterionSuggestionProvider {
@@ -467,6 +562,7 @@ impl SuggestionProvider for CriterionSuggestionProvider {
     }
 }
 
+/// executor to grant/revoke every advancement to specified players
 struct EveryAdvancementExecutor {
     action: Action,
 }
@@ -486,6 +582,8 @@ impl CommandExecutor for EveryAdvancementExecutor {
         })
     }
 }
+
+/// register the advancement command
 pub fn register(dispatcher: &mut CommandDispatcher, registry: &mut PermissionRegistry) {
     registry.register_permission_or_panic(Permission::new(
         PERMISSION,

@@ -19,6 +19,14 @@ pub const ERROR_INVALID_ADVANCEMENT: CommandErrorType<1> = CommandErrorType::new
     translation::java::ADVANCEMENT_ADVANCEMENTNOTFOUND,
 );
 
+/// Represents an argument type used to get a resource key from an identifier.
+///
+/// if you want an [`Advancement`] put the [`ADVANCEMENT_REGISTRY`]
+/// and get it with the [`ResourceKeyArgument::get_advancement`] when it has been parsed
+///
+/// TODO Recipe
+///
+/// if you juste want the [`ResourceKey`] use the [`ResourceKeyArgument::get_registry_key`] function
 pub struct ResourceKeyArgument(pub Identifier);
 
 pub static ERROR_INVALID: CommandErrorType<0> = CommandErrorType::new(
@@ -59,6 +67,16 @@ impl ArgumentType for ResourceKeyArgument {
 }
 
 impl ResourceKeyArgument {
+    /// Returns a [`CommandContext`]'s parsed resource key argument as an [`Advancement`].
+    ///
+    /// # Arguments
+    /// * `context` - The [`CommandContext`] that has the parsed [`ResourceKey`] with the provided argument name.
+    /// * `name` - The name of the argument that was parsed.
+    ///
+    /// # Returns
+    /// The `Advancement` containing the advancement get from the resource key argument, wrapped in an `Ok`,
+    /// or an `Err` with the appropriate [`CommandSyntaxError`] if it could not be resolved or
+    /// that the key correspond to an unknow advancement.
     pub fn get_advancement(
         context: &CommandContext,
         name: &str,
@@ -76,6 +94,15 @@ impl ResourceKeyArgument {
         })
     }
 
+    /// Returns a [`CommandContext`]'s parsed resource key argument in the form of a [`ResourceKey`].
+    ///
+    /// # Arguments
+    /// * `context` - The [`CommandContext`] that has the parsed [`ResourceKey`] with the provided argument name.
+    /// * `name` - The name of the argument that was parsed.
+    ///
+    /// # Returns
+    /// The `ResourceKey` containing the key get from the argument, wrapped in an `Ok`,
+    /// or an `Err` with the appropriate [`CommandSyntaxError`] if it could not be resolved
     pub fn get_registry_key<'a>(
         context: &'a CommandContext,
         name: &str,
