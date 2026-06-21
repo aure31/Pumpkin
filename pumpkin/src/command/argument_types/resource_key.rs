@@ -76,7 +76,7 @@ impl ResourceKeyArgument {
     /// # Returns
     /// The `Advancement` containing the advancement get from the resource key argument, wrapped in an `Ok`,
     /// or an `Err` with the appropriate [`CommandSyntaxError`] if it could not be resolved or
-    /// that the key correspond to an unknow advancement.
+    /// that the key correspond to an unknown advancement.
     pub fn get_advancement(
         context: &CommandContext,
         name: &str,
