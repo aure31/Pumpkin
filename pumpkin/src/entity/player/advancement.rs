@@ -132,7 +132,7 @@ impl Serialize for AdvancementProgress {
     where
         S: Serializer,
     {
-        let mut map: HashMap<&str, &CriterionProgress> = self
+        let map: HashMap<&Arc<str>, &CriterionProgress> = self
             .criteria
             .iter()
             .filter(|(_key, criteria)| criteria.is_done())

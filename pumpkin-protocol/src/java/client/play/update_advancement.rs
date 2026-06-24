@@ -1,17 +1,16 @@
-use crate::codec::item_stack_seralizer::ItemStackSerializer;
+use crate::codec::item_stack_seralizer::ItemStackTemplate;
 use pumpkin_data::Advancement;
 use pumpkin_data::advancement_data::{AdvancementDisplay, AdvancementProgressData};
 use pumpkin_data::packet::clientbound::PLAY_UPDATE_ADVANCEMENTS;
 use pumpkin_macros::java_packet;
 use pumpkin_util::identifier::Identifier;
 use serde::ser::SerializeStruct;
-use serde::{Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeSeq};
 
 fn serialize_advancements<S: Serializer>(
     advancements: &[&'static Advancement],
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    use serde::ser::SerializeSeq;
     let mut seq = serializer.serialize_seq(Some(advancements.len()))?;
     for adv in advancements {
         seq.serialize_element(&AdvancementSer(adv))?;
@@ -35,7 +34,7 @@ impl Serialize for AdvancementSer<'_> {
         } else {
             state.serialize_field("display", &None::<&DisplaySerializer>)?;
         }
-        state.serialize_field("requirements", &adv.requirements)?;
+        state.serialize_field("requirements", adv.requirements)?;
         state.serialize_field("send_telemetry", &adv.send_telemetry)?;
         state.end()
     }
@@ -53,10 +52,7 @@ impl Serialize for DisplaySerializer<'_> {
 
         state.serialize_field("title", &display.get_title())?;
         state.serialize_field("description", &display.get_description())?;
-        state.serialize_field(
-            "icon",
-            &ItemStackSerializer::from(display.item_icon.clone()),
-        )?;
+        state.serialize_field("icon", &ItemStackTemplate::from(display.item_icon.clone()))?;
         let flags = (display.has_background() as i32)
             | ((display.show_toast as i32) << 1)
             | ((display.hidden as i32) << 2);
