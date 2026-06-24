@@ -184,7 +184,7 @@ impl AdvancementTree {
 }
 
 #[derive(Serialize)]
-pub struct AdvancementProgress {
+pub struct AdvancementProgressData {
     pub id: Identifier,
     pub progress: Vec<Criteria>,
 }

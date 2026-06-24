@@ -149,26 +149,14 @@ impl Action {
     ) -> i32 {
         let mut guard = player.advancements.lock().await;
         if !show_advancement {
-            /*TODO player
-            .advancements
-            .lock()
-            .await
-            .flush_dirty(player, true)
-            .await;*/
+            guard.flush_dirty(player, true);
         }
-
         let count = advancements
             .iter()
             .filter(|advancement| self.perform_single_inner(&mut guard, advancement))
             .count() as i32;
-
         if !show_advancement {
-            /*TODO player
-            .advancements
-            .lock()
-            .await
-            .flush_dirty(player, false)
-            .await;*/
+            guard.flush_dirty(player, false);
         }
         count
     }

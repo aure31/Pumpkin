@@ -1,9 +1,15 @@
+mod visibility_evaluator;
+
 use crate::data::advancement_data::AdvancementManager;
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use indexmap::IndexMap;
-use pumpkin_data::advancement_data::{AdvancementNode, AdvancementRequirement, AdvancementReward};
-use pumpkin_data::{Advancement, translation};
+use pumpkin_data::advancement_data::{
+    AdvancementNode, AdvancementProgressData, AdvancementRequirement, AdvancementReward, Criteria,
+};
+use pumpkin_data::{ADVANCEMENT_TREE, Advancement, translation};
+use pumpkin_protocol::java::client::play::{CSelectAdvancementsTab, CUpdateAdvancements};
+use pumpkin_util::identifier::Identifier;
 use pumpkin_util::text::TextComponent;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -13,7 +19,7 @@ use std::fs::{create_dir_all, read, write};
 use std::path::PathBuf;
 use std::str::from_utf8;
 use std::sync::{Arc, Weak};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task::spawn_blocking;
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -40,7 +46,7 @@ impl CriterionProgress {
 ///
 /// Tracks whether the advancement has been fully completed. In the future,
 /// this will also track specific criteria progress.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct AdvancementProgress {
     /// Indicates the different progress of all criteria currently only a boolean
     pub criteria: HashMap<Arc<str>, CriterionProgress>,
@@ -118,6 +124,20 @@ impl AdvancementProgress {
             .iter()
             .filter(|&(_id, criterion)| criterion.is_done())
             .map(|(id, _criterion)| id.clone())
+    }
+}
+
+impl Serialize for AdvancementProgress {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map: HashMap<&str, &CriterionProgress> = self
+            .criteria
+            .iter()
+            .filter(|(_key, criteria)| criteria.is_done())
+            .collect();
+        map.serialize(serializer)
     }
 }
 
@@ -269,12 +289,102 @@ impl PlayerAdvancement {
                 ));
                 self.progress.insert(advancement_ref, progress);
                 self.progress_changed.insert(advancement_ref);
-                //TODO self.mark_for_visibility(advancement_ref);
+                self.mark_for_visibility_update(advancement_ref);
             } else {
                 warn!("The Advancement name {} is invalid", advancement_id);
             }
         }
         Ok(())
+    }
+
+    fn mark_for_visibility_update(&mut self, advancement: &'static Advancement) {
+        let node = ADVANCEMENT_TREE.get_node_from_id(&advancement.id);
+        if let Some(node) = node {
+            self.roots_to_update.insert(node.root());
+        }
+    }
+
+    fn update_tree_visibility(
+        &mut self,
+        root: &AdvancementNode,
+        added: &mut Vec<&'static Advancement>,
+        removed: &mut Vec<Identifier>,
+    ) {
+        visibility_evaluator::evaluate_visibility(
+            root,
+            self,
+            &mut |player_advancement, node| {
+                player_advancement
+                    .progress
+                    .get_mut_or_start_progress(node.value)
+                    .is_done()
+            },
+            &mut move |player_advancement, node, should_be_visible| {
+                let advancement = node.value;
+                if should_be_visible {
+                    if player_advancement.visible.insert(advancement) {
+                        added.push(advancement);
+                        if player_advancement.progress.map.contains_key(advancement) {
+                            player_advancement.progress_changed.insert(advancement);
+                        }
+                    }
+                } else if player_advancement.visible.remove(advancement) {
+                    removed.push(advancement.id.clone());
+                }
+            },
+        );
+    }
+
+    /// Flushes any pending advancement state down to the client.
+    pub fn flush_dirty(&mut self, player: &Arc<Player>, show_advancement: bool) {
+        if self.is_first_packet || !self.roots_to_update.is_empty() {
+            let mut progress: HashMap<Identifier, &AdvancementProgress> = HashMap::new();
+            let mut added: Vec<&Advancement> = Vec::new();
+            let mut removed: Vec<Identifier> = Vec::new();
+            for root in self.roots_to_update.clone() {
+                self.update_tree_visibility(root, &mut added, &mut removed);
+            }
+            self.roots_to_update.clear();
+            for advancement in &self.progress_changed {
+                if self.visible.contains(advancement) {
+                    progress.insert(advancement.id.clone(), &self.progress.map[advancement]);
+                }
+            }
+            self.progress_changed.clear();
+            if !progress.is_empty() || !added.is_empty() || !removed.is_empty() {
+                let player = player.clone();
+                let parsed_progress: Vec<AdvancementProgressData> = progress
+                    .into_iter()
+                    .map(|(key, val)| AdvancementProgressData {
+                        id: key,
+                        progress: val
+                            .criteria
+                            .iter()
+                            .map(|(key, val)| Criteria {
+                                criterion_id: Identifier::parse(key).unwrap(),
+                                achieve_date: val.0.map(|time| {
+                                    time.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64
+                                }),
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                let first_packet = self.is_first_packet;
+                tokio::spawn(async move {
+                    player
+                        .client
+                        .send_packet_now(&CUpdateAdvancements::new(
+                            first_packet,
+                            added,
+                            parsed_progress,
+                            removed,
+                            show_advancement,
+                        ))
+                        .await;
+                });
+            }
+        }
+        self.is_first_packet = false;
     }
 
     /// Grants the rewards (like experience) associated with completing an advancement.
@@ -298,6 +408,7 @@ impl PlayerAdvancement {
             result = true;
             self.progress_changed.insert(advancement);
             if !was_done && progress.is_done() {
+                //TODO listener
                 Self::grant_reward(player.clone(), advancement.reward);
                 if let Some(display) = advancement.display
                     && display.announce_to_chat
@@ -323,7 +434,7 @@ impl PlayerAdvancement {
             }
         }
         if !was_done && progress.is_done() {
-            //TODO self.mark_for_visibility_update(advancement);
+            self.mark_for_visibility_update(advancement);
         }
         result
     }
@@ -340,9 +451,31 @@ impl PlayerAdvancement {
         }
 
         if was_done && !progress.is_done() {
-            //TODO self.mark_for_visibility_update(advancement);
+            self.mark_for_visibility_update(advancement);
         }
         result
+    }
+
+    pub async fn set_selected_tab(&mut self, advancement: Option<&'static Advancement>) {
+        let old = self.last_selected_tab;
+        if let Some(value) = advancement
+            && value.is_root()
+            && value.display.is_some()
+        {
+            self.last_selected_tab = advancement;
+        } else {
+            self.last_selected_tab = None;
+        }
+        if old != self.last_selected_tab
+            && let Some(player) = self.player.upgrade()
+        {
+            player
+                .client
+                .send_packet_now(&CSelectAdvancementsTab::new(
+                    self.last_selected_tab.map(|adv| adv.id.clone()),
+                ))
+                .await;
+        }
     }
 }
 
@@ -351,10 +484,17 @@ impl Serialize for PlayerAdvancement {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(self.progress.len()))?;
+        let filtered_map: HashMap<&'static Advancement, &AdvancementProgress> = self
+            .progress
+            .map
+            .iter()
+            .filter(|(_key, value)| value.has_progress())
+            .map(|(&key, val)| (key, val))
+            .collect();
+        let mut map = serializer.serialize_map(Some(filtered_map.len()))?;
 
-        for (advancement, progress) in &self.progress.map {
-            map.serialize_entry(&advancement.id, progress)?;
+        for (advancement, progress) in &filtered_map {
+            map.serialize_entry(&advancement.id, &progress.criteria)?;
         }
         map.end()
     }
