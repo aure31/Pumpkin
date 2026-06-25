@@ -31,7 +31,7 @@ impl Serialize for AdvancementSer<'_> {
         state.serialize_field("id", &adv.id.to_string())?;
         state.serialize_field("parent", &adv.parent.clone().map(|p| p.to_string()))?;
         if let Some(display) = adv.display {
-            state.serialize_field("display", &DisplaySerializer(display))?;
+            state.serialize_field("display", &Some(DisplaySerializer(display)))?;
         } else {
             state.serialize_field("display", &None::<&DisplaySerializer>)?;
         }
@@ -54,11 +54,11 @@ impl Serialize for DisplaySerializer<'_> {
         state.serialize_field("title", &display.get_title())?;
         state.serialize_field("description", &display.get_description())?;
         state.serialize_field("icon", &ItemStackTemplate::from(display.item_icon.clone()))?;
+        state.serialize_field("frame_type", &VarInt(display.frame_type as i32))?;
         let flags = (display.has_background() as i32)
             | ((display.show_toast as i32) << 1)
             | ((display.hidden as i32) << 2);
         state.serialize_field("flags", &flags)?;
-        state.serialize_field("frame_type", &VarInt(display.frame_type as i32))?;
         if let Some(bg) = display.background_texture {
             state.serialize_field("background_texture", bg)?;
         }
