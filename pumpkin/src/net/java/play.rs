@@ -61,19 +61,21 @@ use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_protocol::java::client::play::{
     CBlockUpdate, CCommandSuggestions, CEntityPositionSync, CHeadRot, COpenSignEditor,
-    CPingResponse, CPlayerInfoUpdate, CPlayerPosition, CSetSelectedSlot, CSystemChatMessage,
-    CUpdateEntityPos, CUpdateEntityPosRot, CUpdateEntityRot, InitChat, PlayerAction,
+    CPingResponse, CPlayerInfoUpdate, CPlayerPosition, CSetCamera, CSetSelectedSlot,
+    CSystemChatMessage, CUpdateEntityPos, CUpdateEntityPosRot, CUpdateEntityRot, InitChat,
+    PlayerAction,
 };
 use pumpkin_protocol::java::server::play::{
-    Action, ActionType, CommandBlockMode, FLAG_ON_GROUND, SAttack, SChangeGameMode, SChatCommand,
-    SChatMessage, SChunkBatch, SClientCommand, SClientInformationPlay, SCloseContainer,
-    SCommandSuggestion, SConfirmTeleport, SCookieResponse as SPCookieResponse, SInteract,
-    SJigsawGenerate, SKeepAlive, SMoveVehicle, SPaddleBoat, SPickItemFromBlock, SPlaceRecipe,
-    SPlayPingRequest, SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput,
-    SPlayerPosition, SPlayerPositionRotation, SPlayerRotation, SPlayerSession,
-    SRecipeBookChangeSettings, SRecipeBookSeenRecipe, SSelectTrade, SSetCommandBlock,
-    SSetCreativeSlot, SSetHeldItem, SSetJigsawBlock, SSetPlayerGround, SSwingArm, SUpdateSign,
-    SUseItem, SUseItemOn, Status,
+    Action, ActionType, CommandBlockMode, FLAG_ON_GROUND, SAttack, SBundleItemSelected,
+    SChangeGameMode, SChatCommand, SChatMessage, SChunkBatch, SClientCommand,
+    SClientInformationPlay, SCloseContainer, SCommandSuggestion, SConfirmTeleport,
+    SCookieResponse as SPCookieResponse, SInteract, SJigsawGenerate, SKeepAlive, SMoveVehicle,
+    SPaddleBoat, SPickItemFromBlock, SPlaceRecipe, SPlayPingRequest, SPlayerAbilities,
+    SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerPosition, SPlayerPositionRotation,
+    SPlayerRotation, SPlayerSession, SRecipeBookChangeSettings, SRecipeBookSeenRecipe,
+    SSelectTrade, SSetCommandBlock, SSetCreativeSlot, SSetHeldItem, SSetJigsawBlock,
+    SSetPlayerGround, SSetTestBlock, SSwingArm, STeleportToEntity, STestInstanceBlockAction,
+    SUpdateSign, SUseItem, SUseItemOn, Status,
 };
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
@@ -325,6 +327,9 @@ impl JavaClient {
         if !player.has_client_loaded() {
             return;
         }
+        if player.get_entity().has_vehicle().await {
+            return;
+        }
         // Ignore movement packets while awaiting a teleport confirmation (vanilla behavior)
         if player.awaiting_teleport.lock().await.is_some() {
             return;
@@ -453,6 +458,9 @@ impl JavaClient {
         packet: SPlayerPositionRotation,
     ) {
         if !player.has_client_loaded() {
+            return;
+        }
+        if player.get_entity().has_vehicle().await {
             return;
         }
         // Ignore movement packets while awaiting a teleport confirmation (vanilla behavior)
@@ -978,7 +986,20 @@ impl JavaClient {
         input: SPlayerInput,
         server: &Server,
     ) {
+        player.last_input.store(input.input, Ordering::Relaxed);
+
         let sneak = input.input & SPlayerInput::SNEAK != 0;
+        if sneak
+            && player.gamemode.load() == GameMode::Spectator
+            && player.camera_target_id.load().is_some()
+        {
+            player.camera_target_id.store(None);
+            player
+                .client
+                .send_packet_now(&CSetCamera::new(player.entity_id().into()))
+                .await;
+        }
+
         if player.get_entity().is_sneaking() != sneak {
             send_cancellable! {{
                 server;
@@ -1691,6 +1712,7 @@ impl JavaClient {
         player.attack(target).await;
     }
 
+    #[expect(clippy::too_many_lines)]
     pub async fn handle_interact(
         &self,
         player: &Arc<Player>,
@@ -1722,6 +1744,14 @@ impl JavaClient {
             .or_else(|| world.get_entity_by_id(entity_id.0));
 
         if let Some(target) = target {
+            if player.gamemode.load() == GameMode::Spectator {
+                player.camera_target_id.store(Some(entity_id.0));
+                player
+                    .client
+                    .send_packet_now(&CSetCamera::new(entity_id))
+                    .await;
+                return;
+            }
             send_cancellable! {{
                 server;
                 PlayerInteractEntityEvent::new(
@@ -1767,13 +1797,15 @@ impl JavaClient {
                         }
                         ActionType::Interact | ActionType::InteractAt => {
                             let held = player.inventory.held_item();
-                            let mut stack = held.lock().await;
-                            if !event.target.interact(player, &mut stack).await {
+                            let mut stack = held.lock().await.clone();
+                            let interacted = event.target.interact(player, &mut stack).await;
+                            if !interacted {
                                 server
                                     .item_registry
                                     .use_on_entity(&mut stack, player, event.target)
                                     .await;
                             }
+                            *held.lock().await = stack;
                         }
                     }
                 }
@@ -2127,8 +2159,10 @@ impl JavaClient {
             return Err(BlockPlacingError::InvalidHand);
         };
 
-        //TODO this.player.resetLastActionTime();
-        //TODO this.gameModeForPlayer == GameType.SPECTATOR
+        if player.gamemode.load() == GameMode::Spectator {
+            // TODO: openMenu
+            return Ok(());
+        }
 
         let inventory = player.inventory();
         let held_item = inventory.held_item();
@@ -2461,6 +2495,17 @@ impl JavaClient {
             }
         }
         if let Some(equippable) = held.get_data_component::<EquippableImpl>() {
+            // Skip if the item is already in the target equipment slot.
+            // This prevents a self-deadlock: `held` already locks the same
+            // Mutex<ItemStack> that `get_or_insert` would return, and
+            // Tokio's Mutex is not reentrant.
+            if inventory
+                .is_already_equipped(item_in_hand, equippable.slot)
+                .await
+            {
+                return;
+            }
+
             // If it can be equipped we want to make sure we can actually equip it
             player
                 .enqueue_equipment_change(equippable.slot, &held)
@@ -2908,5 +2953,87 @@ impl JavaClient {
                 .set_selected_offer(packet.selected_slot.0 as usize)
                 .await;
         }
+    }
+
+    pub async fn handle_bundle_item_selected(
+        &self,
+        player: &Arc<Player>,
+        packet: SBundleItemSelected,
+    ) {
+        if !player.has_client_loaded() {
+            return;
+        }
+        player.update_last_action_time();
+
+        let selected_item_index = packet.selected_item_index.0;
+        if selected_item_index < 0 && selected_item_index != -1 {
+            self.kick(TextComponent::text("Invalid selected item index"))
+                .await;
+            return;
+        }
+
+        debug!(
+            "Bundle item selected: Slot ID {}, Selected Item Index {}",
+            packet.slot_id.0, selected_item_index
+        );
+    }
+
+    pub async fn handle_teleport_to_entity(
+        &self,
+        player: &Arc<Player>,
+        packet: STeleportToEntity,
+        server: &Server,
+    ) {
+        if !player.has_client_loaded() {
+            return;
+        }
+        player.update_last_action_time();
+
+        if player.gamemode.load() != GameMode::Spectator {
+            return;
+        }
+
+        if let Some(target_player) = server.get_player_by_uuid(packet.target) {
+            let target_pos = target_player.living_entity.entity.pos.load();
+            let target_yaw = target_player.living_entity.entity.yaw.load();
+            let target_pitch = target_player.living_entity.entity.pitch.load();
+
+            let target_id = target_player.living_entity.entity.entity_id;
+            player.camera_target_id.store(Some(target_id));
+            player
+                .client
+                .send_packet_now(&CSetCamera::new(target_id.into()))
+                .await;
+
+            player
+                .request_teleport(target_pos, target_yaw, target_pitch)
+                .await;
+        }
+    }
+
+    pub fn handle_test_instance_block_action(
+        &self,
+        player: &Arc<Player>,
+        packet: &STestInstanceBlockAction,
+    ) {
+        if !player.has_client_loaded() {
+            return;
+        }
+        player.update_last_action_time();
+        debug!(
+            "Test instance block action at {:?}: action={:?}",
+            packet.pos, packet.action
+        );
+    }
+
+    pub fn handle_set_test_block(&self, player: &Arc<Player>, packet: &SSetTestBlock) {
+        if !player.has_client_loaded() {
+            return;
+        }
+        player.update_last_action_time();
+        debug!(
+            "Set test block at {:?}: mode={:?}, message={}",
+            packet.position, packet.mode, packet.message
+        );
     }
 }
