@@ -240,7 +240,7 @@ fn get_advancements(target: &Advancement, mode: Mode) -> Vec<&Advancement> {
                 while let Some(parent_id) = parent {
                     let current_node = &tree.nodes_vector[parent_id];
                     advancements.push(current_node.value);
-                    parent = current_node.parent
+                    parent = current_node.parent;
                 }
             }
             advancements.push(target);

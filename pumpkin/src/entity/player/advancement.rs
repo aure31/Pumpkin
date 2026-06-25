@@ -147,7 +147,7 @@ impl<'de> Deserialize<'de> for AdvancementProgress {
         D: Deserializer<'de>,
     {
         let criteria = HashMap::<Arc<str>, CriterionProgress>::deserialize(deserializer)?;
-        Ok(AdvancementProgress {
+        Ok(Self {
             criteria,
             requirements: AdvancementRequirement::default(),
         })

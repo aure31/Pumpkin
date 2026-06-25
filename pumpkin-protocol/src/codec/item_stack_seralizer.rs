@@ -386,7 +386,7 @@ impl From<ItemStack> for ItemStackTemplate<'_> {
     }
 }
 
-impl<'a> Serialize for ItemStackTemplate<'a> {
+impl Serialize for ItemStackTemplate<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
