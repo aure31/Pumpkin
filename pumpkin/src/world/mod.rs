@@ -42,7 +42,10 @@ use crate::{
     net::{ClientPlatform, java::JavaClient},
     plugin::{
         block::block_break::BlockBreakEvent,
-        player::{player_join::PlayerJoinEvent, player_leave::PlayerLeaveEvent},
+        player::{
+            player_join::PlayerJoinEvent, player_leave::PlayerLeaveEvent,
+            player_respawn::PlayerRespawnEvent,
+        },
     },
     server::Server,
 };
@@ -2491,6 +2494,7 @@ impl World {
                         name: &player.gameprofile.name,
                         properties,
                     },
+                    PlayerAction::UpdateGameMode(VarInt(player.gamemode.load() as i32)),
                     PlayerAction::UpdateListed(player.tab_list_listed.load(Ordering::Relaxed)),
                     PlayerAction::UpdateLatency(VarInt(
                         player.tab_list_latency.load(Ordering::Relaxed),
@@ -2498,7 +2502,6 @@ impl World {
                     PlayerAction::UpdateListOrder(VarInt(
                         player.tab_list_order.load(Ordering::Relaxed),
                     )),
-                    PlayerAction::UpdateGameMode(VarInt(player.gamemode.load() as i32)),
                 ];
 
                 if base_config.allow_chat_reports {
@@ -2719,8 +2722,8 @@ impl World {
                     name: &gameprofile.name,
                     properties: &gameprofile.properties.load(),
                 },
-                PlayerAction::UpdateListed(existing_player.tab_list_listed.load(Ordering::Relaxed)),
                 PlayerAction::UpdateGameMode(VarInt(existing_player.gamemode.load() as i32)),
+                PlayerAction::UpdateListed(existing_player.tab_list_listed.load(Ordering::Relaxed)),
                 PlayerAction::UpdateLatency(VarInt(
                     existing_player.tab_list_latency.load(Ordering::Relaxed),
                 )),
@@ -3135,7 +3138,7 @@ impl World {
             // Unload watched chunks from current world
             player.unload_watched_chunks(self).await;
 
-            (new_world.as_ref(), position)
+            (new_world.clone(), position)
         } else if respawn_dimension != self.dimension {
             // Cross-dimension failed - fall back to current world's spawn
             warn!(
@@ -3152,10 +3155,26 @@ impl World {
                 (top + 1).into(),
                 f64::from(spawn_z) + 0.5,
             );
-            (self.as_ref(), fallback_pos)
+            (self.clone(), fallback_pos)
         } else {
-            (self.as_ref(), position)
+            (self.clone(), position)
         };
+
+        // Notify plugins that the player has respawned (non-cancellable).
+        if let Some(server) = self.server.upgrade() {
+            let _ = server
+                .plugin_manager
+                .fire(PlayerRespawnEvent::new(
+                    player.clone(),
+                    self.clone(),
+                    target_world.clone(),
+                    position,
+                    yaw,
+                    pitch,
+                    alive,
+                ))
+                .await;
+        }
 
         // Send respawn packet with target dimension (using send_packet_now to ensure proper order)
         player
@@ -4749,6 +4768,18 @@ impl World {
         self.level.read_chunk_sync(&chunk_pos, |chunk| {
             chunk.mark_dirty(true);
         });
+    }
+
+    pub fn add_block_entity_nbt(&self, block_pos: BlockPos, nbt: &NbtCompound) {
+        self.level
+            .read_chunk_sync(&block_pos.chunk_position(), |chunk| {
+                chunk
+                    .pending_block_entities
+                    .lock()
+                    .unwrap()
+                    .insert(block_pos, nbt.clone());
+                chunk.mark_dirty(true);
+            });
     }
 
     pub fn remove_block_entity(&self, block_pos: &BlockPos) {
