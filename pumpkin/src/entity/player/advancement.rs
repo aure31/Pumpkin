@@ -12,7 +12,7 @@ use pumpkin_protocol::java::client::play::{CSelectAdvancementsTab, CUpdateAdvanc
 use pumpkin_util::identifier::Identifier;
 use pumpkin_util::text::TextComponent;
 use serde::ser::SerializeMap;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::to_string_pretty;
 use std::collections::{HashMap, HashSet};
 use std::fs::{create_dir_all, read, write};
@@ -46,7 +46,7 @@ impl CriterionProgress {
 ///
 /// Tracks whether the advancement has been fully completed. In the future,
 /// this will also track specific criteria progress.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AdvancementProgress {
     /// Indicates the different progress of all criteria currently only a boolean
     pub criteria: HashMap<Arc<str>, CriterionProgress>,
@@ -138,6 +138,19 @@ impl Serialize for AdvancementProgress {
             .filter(|(_key, criteria)| criteria.is_done())
             .collect();
         map.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AdvancementProgress {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let criteria = HashMap::<Arc<str>, CriterionProgress>::deserialize(deserializer)?;
+        Ok(AdvancementProgress {
+            criteria,
+            requirements: AdvancementRequirement::default(),
+        })
     }
 }
 
@@ -361,7 +374,7 @@ impl PlayerAdvancement {
                             .criteria
                             .iter()
                             .map(|(key, val)| Criteria {
-                                criterion_id: Identifier::parse(key).unwrap(),
+                                criterion_id: key.clone(),
                                 achieve_date: val.0.map(|time| {
                                     time.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64
                                 }),

@@ -191,7 +191,7 @@ pub struct AdvancementProgressData {
 
 #[derive(Serialize)]
 pub struct Criteria {
-    pub criterion_id: Identifier,
+    pub criterion_id: Arc<str>,
     pub achieve_date: Option<i64>,
 }
 /// Represents the requirements needed to complete an advancement.

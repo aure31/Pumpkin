@@ -236,9 +236,11 @@ fn get_advancements(target: &Advancement, mode: Mode) -> Vec<&Advancement> {
         |target_node| {
             let mut advancements = Vec::new();
             if mode.parents() {
-                let parent = target_node.parent;
-                while let Some(parent) = parent {
-                    advancements.push(tree.nodes_vector[parent].value);
+                let mut parent = target_node.parent;
+                while let Some(parent_id) = parent {
+                    let current_node = &tree.nodes_vector[parent_id];
+                    advancements.push(current_node.value);
+                    parent = current_node.parent
                 }
             }
             advancements.push(target);
