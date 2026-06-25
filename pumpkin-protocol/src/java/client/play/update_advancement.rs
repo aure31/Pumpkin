@@ -1,4 +1,5 @@
 use crate::codec::item_stack_seralizer::ItemStackTemplate;
+use crate::codec::var_int::VarInt;
 use pumpkin_data::Advancement;
 use pumpkin_data::advancement_data::{AdvancementDisplay, AdvancementProgressData};
 use pumpkin_data::packet::clientbound::PLAY_UPDATE_ADVANCEMENTS;
@@ -57,7 +58,7 @@ impl Serialize for DisplaySerializer<'_> {
             | ((display.show_toast as i32) << 1)
             | ((display.hidden as i32) << 2);
         state.serialize_field("flags", &flags)?;
-        state.serialize_field("frame_type", &(display.frame_type as i32))?;
+        state.serialize_field("frame_type", &VarInt(display.frame_type as i32))?;
         if let Some(bg) = display.background_texture {
             state.serialize_field("background_texture", bg)?;
         }
