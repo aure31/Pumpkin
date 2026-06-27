@@ -109,7 +109,7 @@ fn register_wit_type(
 
 #[inline]
 #[must_use]
-// Only process structs with #[packet] attribute
+/// Check for `#[java_packet]` attribute
 fn has_java_packet_attr(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident("java_packet"))
 }

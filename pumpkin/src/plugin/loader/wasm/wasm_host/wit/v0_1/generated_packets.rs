@@ -1921,6 +1921,17 @@ pub fn deserialize_bedrock_serverbound_packet(
                 download_size: p.download_size.try_into().unwrap(),
             }))
         }
+        id if id == <pumpkin_protocol::bedrock::server::SSetPlayerInventoryOptions as pumpkin_protocol::Packet>::PACKET_ID as i32 => {
+            use pumpkin_protocol::BServerPacket;
+            let p = <pumpkin_protocol::bedrock::server::SSetPlayerInventoryOptions as pumpkin_protocol::BServerPacket>::read(&mut Cursor::new(payload)).ok()?;
+            Some(BServerboundPacket::SSetPlayerInventoryOptions(crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::bedrock_packets::SSetPlayerInventoryOptions {
+                left_inventory_tab: p.left_inventory_tab.try_into().unwrap(),
+                right_inventory_tab: p.right_inventory_tab.try_into().unwrap(),
+                filtering: p.filtering.try_into().unwrap(),
+                inventory_layout: p.inventory_layout.try_into().unwrap(),
+                crafting_layout: p.crafting_layout.try_into().unwrap(),
+            }))
+        }
         _ => None,
     }
 }

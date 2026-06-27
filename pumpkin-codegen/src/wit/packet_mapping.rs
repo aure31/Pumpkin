@@ -192,18 +192,18 @@ fn get_type_info(ty: &syn::Type) -> (String, bool, bool) {
     }
 }
 
-/// Génère la conversion d'une valeur selon son type.
-/// `src` est l'expression source (ex: "data.field", "self.field", "identifier")
-/// `dst` est le nom de destination (ex: "field_name", "wit_field") — None pour les unnamed (on retourne juste l'expression)
-/// Retourne (prep_code, expression_convertie, possible)
+/// Generates the conversion of a value according to its type.
+/// `src` is the source expression (ex: "data.field", "self.field", "identifier")
+/// `dst` is the destination name (ex: "field_name", "wit_field") — None for unnamed (we just return the expression)
+/// Returns (prep_code, converted_expression, possible)
 fn convert_value(
     type_ident: &str,
     is_ref: bool,
     is_slice: bool,
     src: &str,
-    dst: Option<&str>, // None = unnamed field, on retourne l'expression sans "dst: "
+    dst: Option<&str>,
     mode: MappingMode,
-    prep_prefix: &str, // indentation pour le prep_code
+    prep_prefix: &str, // indentation for prefix
 ) -> (String, String, bool) {
     let mut prep = String::new();
     let mut possible = true;
@@ -804,7 +804,7 @@ fn process_enum(
     }
 }
 
-/// return the bindings of a variant : (pattern_destruc, vec of (binding_name, syn::Type))
+/// return the bindings of a variant : (pattern_destruct, vec of (binding_name, syn::Type))
 fn variant_bindings(v: &syn::Variant) -> (String, Vec<(String, syn::Type)>) {
     match &v.fields {
         Fields::Unnamed(fields) => {
