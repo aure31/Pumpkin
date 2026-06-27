@@ -63,15 +63,15 @@ use pumpkin_protocol::bedrock::client::container_open::CContainerOpen;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::java::client::play::{
-    Animation, CAcknowledgeBlockChange, CActionBar, CAwardStats, CChangeDifficulty,
-    CCloseContainer, CCombatDeath, CCustomPayload, CDisguisedChatMessage, CEntityAnimation,
-    CEntityPositionSync, CGameEvent, CItemCooldown, CMapItemData, COpenScreen, CParticle,
-    CPlayerAbilities, CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRespawn,
-    CSetCamera, CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem,
-    CSetEquipment, CSetExperience, CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect,
-    CStopSound, CSubtitle, CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk,
-    CUpdateMobEffect, CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction,
-    PlayerInfoFlags, PlayerSpawnData, PreviousMessage, Statistic,
+    Animation, CActionBar, CAwardStats, CChangeDifficulty, CCloseContainer, CCombatDeath,
+    CCustomPayload, CDisguisedChatMessage, CEntityAnimation, CEntityPositionSync, CGameEvent,
+    CItemCooldown, CMapItemData, COpenScreen, CParticle, CPlayerAbilities, CPlayerInfoUpdate,
+    CPlayerPosition, CPlayerSpawnPosition, CRespawn, CSetCamera, CSetContainerContent,
+    CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetEquipment, CSetExperience,
+    CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound, CSubtitle,
+    CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk, CUpdateMobEffect,
+    CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction, PlayerInfoFlags,
+    PlayerSpawnData, PreviousMessage, Statistic,
 };
 use pumpkin_protocol::java::server::play::{
     SClickSlot, SContainerButtonClick, SRenameItem, SlotActionType,
@@ -411,7 +411,7 @@ pub struct Player {
     /// The player's game profile information, including their username and UUID.
     pub gameprofile: GameProfile,
     /// The client connection associated with the player.
-    pub client: ClientPlatform,
+    pub client: Arc<ClientPlatform>,
     /// The player's inventory.
     pub inventory: Arc<PlayerInventory>,
     /// The player's `EnderChest` inventory.
@@ -452,7 +452,6 @@ pub struct Player {
     pub mining: AtomicBool,
     pub start_mining_time: AtomicI32,
     pub tick_counter: AtomicI32,
-    pub packet_sequence: AtomicI32,
     pub mining_pos: Mutex<BlockPos>,
     pub last_input: AtomicI8,
     /// A counter for teleport IDs used to track pending teleports.
@@ -572,7 +571,7 @@ impl Player {
 
     #[expect(clippy::too_many_lines)]
     pub async fn new(
-        client: ClientPlatform,
+        client: Arc<ClientPlatform>,
         gameprofile: GameProfile,
         config: PlayerConfig,
         world: Arc<World>,
@@ -646,7 +645,6 @@ impl Player {
             open_container: AtomicCell::new(None),
             open_container_pos: AtomicCell::new(None),
             tick_counter: AtomicI32::new(0),
-            packet_sequence: AtomicI32::new(-1),
             start_mining_time: AtomicI32::new(0),
             last_input: AtomicI8::new(0),
             carried_item: Mutex::new(None),
@@ -1731,7 +1729,7 @@ impl Player {
     }
 
     pub async fn show_title(&self, text: &TextComponent, mode: &TitleMode) {
-        match &self.client {
+        match self.client.as_ref() {
             ClientPlatform::Java(client) => match mode {
                 TitleMode::Title => client.enqueue_packet(&CTitleText::new(text)).await,
                 TitleMode::SubTitle => client.enqueue_packet(&CSubtitle::new(text)).await,
@@ -1759,7 +1757,7 @@ impl Player {
     }
 
     pub async fn send_title_animation(&self, fade_in: i32, stay: i32, fade_out: i32) {
-        match &self.client {
+        match self.client.as_ref() {
             ClientPlatform::Java(client) => {
                 client
                     .enqueue_packet(&CTitleAnimation::new(fade_in, stay, fade_out))
@@ -1859,7 +1857,6 @@ impl Player {
             .await;
     }
 
-    // TODO Abstract the chunk sending
     #[expect(clippy::too_many_lines)]
     pub async fn tick(self: &Arc<Self>, server: &Server) {
         if let Some(camera_id) = self.camera_target_id.load() {
@@ -1900,13 +1897,6 @@ impl Player {
         //     return;
         // }
 
-        let seq = self.packet_sequence.swap(-1, Ordering::Relaxed);
-        if seq != -1 {
-            self.client
-                .send_packet_now(&CAcknowledgeBlockChange::new(seq.into()))
-                .await;
-        }
-
         // Statistics updates
         {
             let mut stats = self.stats.lock().await;
@@ -1925,11 +1915,10 @@ impl Player {
                 *xp -= 1;
             }
         }
-
         let (chunk_of_chunks, total_sent_chunks) = {
             let mut chunk_manager = self.chunk_manager.lock().await;
             chunk_manager.pull_new_chunks();
-            let chunks = if let ClientPlatform::Java(_) = self.client {
+            let chunks = if let ClientPlatform::Java(_) = self.client.as_ref() {
                 // Java clients can only send a limited amount of chunks per tick.
                 // If we have sent too many chunks without receiving an ack, we stop sending chunks.
                 chunk_manager
@@ -1940,11 +1929,12 @@ impl Player {
             };
             (chunks, chunk_manager.sent_chunks_count())
         };
-
         if let Some(chunk_of_chunks) = chunk_of_chunks {
-            self.client.send_chunks(&chunk_of_chunks).await;
-
-            if let ClientPlatform::Bedrock(bedrock_client) = &self.client
+            let client = self.client.clone();
+            tokio::spawn(async move {
+                client.send_chunks(&chunk_of_chunks).await;
+            });
+            if let ClientPlatform::Bedrock(bedrock_client) = self.client.as_ref()
                 && !self.bedrock_spawned.load(Ordering::Relaxed)
                 && total_sent_chunks > 4
             {
@@ -1954,7 +1944,6 @@ impl Player {
                 self.bedrock_spawned.store(true, Ordering::Relaxed);
             }
         }
-
         self.tick_counter.fetch_add(1, Ordering::Relaxed);
         self.living_entity
             .entity
@@ -1988,7 +1977,6 @@ impl Player {
                 .await;
             }
         }
-
         self.last_attacked_ticks.fetch_add(1, Ordering::Relaxed);
 
         let caller: Arc<dyn EntityBase> = self.clone();
@@ -1997,6 +1985,7 @@ impl Player {
         self.update_player_pose().await;
         self.breath_manager.tick(self).await;
         self.hunger_manager.tick(self).await;
+        self.advancements.lock().await.flush_dirty(self, true);
 
         // experience handling
         self.tick_experience().await;
@@ -2005,7 +1994,6 @@ impl Player {
 
         // Timeout/keep alive handling
         self.tick_client_load_timeout();
-
         // Idle timeout handling
         let now = Instant::now();
         let idle_timeout_minutes = server.player_idle_timeout.load(Ordering::Relaxed);
@@ -2150,7 +2138,7 @@ impl Player {
 
     /// Updates the current abilities the player has.
     pub async fn send_abilities_update(&self) {
-        match &self.client {
+        match self.client.as_ref() {
             ClientPlatform::Java(java) => {
                 let mut b = 0;
                 let abilities = &self.abilities.lock().await;
@@ -2253,7 +2241,7 @@ impl Player {
     }
 
     pub async fn send_stats(&self) {
-        if let ClientPlatform::Java(java) = &self.client {
+        if let ClientPlatform::Java(java) = self.client.as_ref() {
             let stats_guard = self.stats.lock().await;
             let packet_stats: Vec<Statistic> = stats_guard
                 .stats
@@ -2403,7 +2391,7 @@ impl Player {
         self.permission_lvl.store(lvl);
         self.send_permission_lvl_update();
 
-        if let ClientPlatform::Bedrock(_) = &self.client {
+        if let ClientPlatform::Bedrock(_) = self.client.as_ref() {
             client_suggestions::send_bedrock_commands_packet(self, server, command_dispatcher)
                 .await;
         } else {
@@ -2414,7 +2402,7 @@ impl Player {
     /// Sends the world time to only this player.
     pub async fn send_time(&self, world: &World) {
         let l_world = world.level_time.lock().await;
-        match &self.client {
+        match self.client.as_ref() {
             ClientPlatform::Java(java_client) => {
                 java_client
                     .enqueue_packet(&CUpdateTime::new(
@@ -2633,7 +2621,7 @@ impl Player {
             return;
         }
 
-        match &self.client {
+        match self.client.as_ref() {
             ClientPlatform::Java(client) => {
                 client
                     .enqueue_packet(&CSetHealth::new(
@@ -2907,7 +2895,7 @@ impl Player {
                         }],
                     ));
 
-                match &self.client {
+                match self.client.as_ref() {
                     crate::net::ClientPlatform::Java(client) => {
                         client
                             .enqueue_packet(&CGameEvent::new(
@@ -3030,7 +3018,7 @@ impl Player {
 
     /// Sends a custom payload packet to this player (Java edition only).
     pub async fn send_custom_payload(&self, channel: &str, data: &[u8]) {
-        if let ClientPlatform::Java(java) = &self.client {
+        if let ClientPlatform::Java(java) = self.client.as_ref() {
             java.enqueue_packet(&CCustomPayload::new(channel, data))
                 .await;
         }
@@ -3123,7 +3111,7 @@ impl Player {
     }
 
     pub async fn send_system_message_raw(&self, text: &TextComponent, overlay: bool) {
-        match &self.client {
+        match self.client.as_ref() {
             ClientPlatform::Java(client) => {
                 client
                     .enqueue_packet(&CSystemChatMessage::new(text, overlay))

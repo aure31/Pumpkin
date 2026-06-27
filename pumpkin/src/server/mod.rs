@@ -457,7 +457,7 @@ impl Server {
     /// You still have to spawn the `Player` in a `World` to let them join and make them visible.
     pub async fn add_player(
         &self,
-        client: ClientPlatform,
+        client: Arc<ClientPlatform>,
         profile: GameProfile,
         config: Option<PlayerConfig>,
     ) -> Option<(Arc<Player>, Arc<World>)> {
@@ -515,12 +515,13 @@ impl Server {
 
         // Wrap in Arc after data is loaded
         let player = Arc::new(player);
-        let mut advancements = player.advancements.lock().await;
-        if let Err(e) = advancements.load() {
-            warn!("Error loading player {}: {e}", player.gameprofile.id);
-        }
-        advancements.player = Arc::downgrade(&player);
-        drop(advancements);
+        {
+            let mut advancements = player.advancements.lock().await;
+            if let Err(e) = advancements.load().await {
+                warn!("Error loading player {}: {e}", player.gameprofile.id);
+            }
+            advancements.player = Arc::downgrade(&player);
+        };
 
         send_cancellable! {{
             self;

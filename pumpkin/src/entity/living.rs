@@ -8,6 +8,7 @@ use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_protocol::bedrock::client::take_item_actor::CTakeItemActor;
 use pumpkin_protocol::bedrock::server::actor_event::{ActorEventType, SActorEvent};
+use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_util::GameMode;
 use pumpkin_util::Hand;
 use pumpkin_util::math::position::BlockPos;
@@ -207,11 +208,11 @@ impl LivingEntity {
             &CTakeItemEntity::new(
                 item.entity_id.into(),
                 self.entity.entity_id.into(),
-                stack_amount.try_into().unwrap(),
+                VarInt(stack_amount as i32),
             ),
             &CTakeItemActor::new(
-                item.entity_id.try_into().unwrap(),
-                self.entity.entity_id.try_into().unwrap(),
+                VarULong(item.entity_id as u64),
+                VarULong(self.entity.entity_id as u64),
             ),
         );
     }
@@ -1316,6 +1317,27 @@ impl LivingEntity {
 
             // Plays the death sound
             world.send_entity_status(&self.entity, EntityStatus::Death);
+            let tool = if let Some(cause_ent) = cause {
+                if let Some(player) = cause_ent
+                    .cast_any()
+                    .downcast_ref::<crate::entity::player::Player>()
+                {
+                    let hand_stack = player
+                        .inventory
+                        .get_stack_in_hand(pumpkin_util::Hand::Right)
+                        .await;
+                    let stack_guard = hand_stack.lock().await;
+                    (stack_guard.item_count > 0).then(|| stack_guard.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let is_raining = world.is_raining().await;
+            let is_thundering = world.is_thundering().await;
+
             let params = LootContextParameters {
                 killed_by_player: cause.map(|c| c.get_entity().entity_type == &EntityType::PLAYER),
                 this_entity: Some(self.entity.entity_type),
@@ -1324,11 +1346,14 @@ impl LivingEntity {
                 position: Some(self.entity.pos.load()),
                 world_time: world.level_info.load().day_time as u64,
                 damage_type: Some(damage_type),
+                tool,
+                is_raining: Some(is_raining),
+                is_thundering: Some(is_thundering),
                 ..Default::default()
             };
 
             // Drop loot
-            self.drop_loot(params).await;
+            self.drop_loot(params.clone()).await;
 
             // Award experience
             if params.killed_by_player.unwrap_or(false)
