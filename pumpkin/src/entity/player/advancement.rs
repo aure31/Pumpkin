@@ -777,8 +777,8 @@ mod tests {
         assert_eq!(saved_data.len(), 2, "Should have saved both advancements");
     }
 
-    #[test]
-    fn ignore_loading() {
+    #[tokio::test]
+    async fn ignore_loading() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), false));
 
@@ -790,7 +790,7 @@ mod tests {
         std::fs::write(&pa.path, data.to_string()).unwrap();
 
         //try load the file
-        assert!(pa.load().is_ok(), "Load should succeed");
+        assert!(pa.load().await.is_ok(), "Load should succeed");
 
         // Verify that the advancement was not loaded
         assert!(
