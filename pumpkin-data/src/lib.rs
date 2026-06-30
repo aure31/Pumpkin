@@ -348,3 +348,4 @@ pub mod villager;
 #[rustfmt::skip]
 #[path = "generated/slot_ranges.rs"]
 pub mod slot_ranges;
+pub mod criterion;

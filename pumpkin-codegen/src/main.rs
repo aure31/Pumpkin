@@ -21,6 +21,7 @@ mod chunk_gen_settings;
 mod chunk_status;
 mod composter_increase_chance;
 mod configured_feature;
+pub mod criterion;
 mod damage_type;
 mod data_component;
 mod dimension;
