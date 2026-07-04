@@ -770,6 +770,9 @@ fn process_enum(
     rust_path_prefix: &str,
     mode: MappingMode,
 ) {
+    if !matches!(e.vis, syn::Visibility::Public(_)) {
+        return;
+    }
     let enum_name = e.ident.to_string();
     let wit_case = enum_name.to_pascal_case();
     let enum_name_with_lt = if !e.generics.params.is_empty() {
