@@ -273,23 +273,24 @@ fn convert_value(
             };
 
             if mode == MappingMode::Serialize {
+                let tmp = dst.unwrap_or("tmp").replace('.', "_");
                 if is_slice {
                     prep.push_str(&format!(
-                        "            let vec_{}: Vec<{}> = {}.iter().map(|v| {}(*v as _)).collect();\n",
-                        prep_prefix, path, src, path
+                        "{}let vec_{}: Vec<{}> = {}.iter().map(|v| {}(*v as _)).collect();\n",
+                        prep_prefix, tmp, path, src, path
                     ));
                     if is_ref {
-                        format!("&vec_{}", prep_prefix)
+                        format!("&vec_{}", tmp)
                     } else {
-                        format!("vec_{}", prep_prefix)
+                        format!("vec_{}", tmp)
                     }
                 } else {
                     if is_ref {
                         prep.push_str(&format!(
-                            "            let var_long_{} = {}({}.try_into().unwrap());\n",
-                            prep_prefix, path, src
+                            "{}let var_long_{} = {}({}.try_into().unwrap());\n",
+                            prep_prefix, tmp, path, src
                         ));
-                        format!("&var_long_{}", prep_prefix)
+                        format!("&var_long_{}", tmp)
                     } else {
                         format!("{}({}.try_into().unwrap())", path, src)
                     }
@@ -402,8 +403,8 @@ fn convert_value(
         "i32" | "u32" | "i64" | "u64" | "bool" | "f32" | "f64" | "u8" | "i8" | "u16" | "i16"
         | "VarInt" => match mode {
             MappingMode::Serialize => {
+                let tmp = dst.unwrap_or("tmp").replace('.', "_");
                 if is_slice {
-                    let tmp = dst.unwrap_or("tmp").replace('.', "_");
                     if type_ident == "u8" {
                         if is_ref {
                             format!("&{}", src)
@@ -424,9 +425,25 @@ fn convert_value(
                         format!("{}.iter().map(|v| *v as _).collect()", src)
                     }
                 } else if type_ident == "VarInt" {
-                    format!("VarInt({})", src)
+                    if is_ref {
+                        prep.push_str(&format!(
+                            "{}let var_int_{} = VarInt({});\n",
+                            prep_prefix, tmp, src
+                        ));
+                        format!("&var_int_{}", tmp)
+                    } else {
+                        format!("VarInt({})", src)
+                    }
                 } else {
-                    format!("{}.try_into().unwrap()", src)
+                    if is_ref {
+                        prep.push_str(&format!(
+                            "{}let val_{} = {}.try_into().unwrap();\n",
+                            prep_prefix, tmp, src
+                        ));
+                        format!("&val_{}", tmp)
+                    } else {
+                        format!("{}.try_into().unwrap()", src)
+                    }
                 }
             }
             MappingMode::Deserialize | MappingMode::ToWit => {
@@ -521,10 +538,26 @@ fn parse_packet_file(
                 if s.ident == "CHandshake" {
                     continue;
                 }
-                process_struct(s, output, attr_name, variant_prefix, rust_path_prefix, mode);
+                process_struct(
+                    s,
+                    state,
+                    output,
+                    attr_name,
+                    variant_prefix,
+                    rust_path_prefix,
+                    mode,
+                );
             }
             Item::Enum(e) if has_attr(&e.attrs, attr_name) => {
-                process_enum(e, output, attr_name, variant_prefix, rust_path_prefix, mode);
+                process_enum(
+                    e,
+                    state,
+                    output,
+                    attr_name,
+                    variant_prefix,
+                    rust_path_prefix,
+                    mode,
+                );
             }
             _ => {}
         }
@@ -533,6 +566,7 @@ fn parse_packet_file(
 
 fn process_struct(
     s: syn::ItemStruct,
+    state: &str,
     output: &mut String,
     attr_name: &str,
     variant_prefix: &str,
@@ -540,7 +574,11 @@ fn process_struct(
     mode: MappingMode,
 ) {
     let struct_name = s.ident.to_string();
-    let wit_case = struct_name.to_pascal_case();
+    let wit_case = if state == "play" {
+        struct_name.to_pascal_case()
+    } else {
+        format!("{}{}", state, struct_name).to_pascal_case()
+    };
     let struct_name_with_lt = if !s.generics.params.is_empty() {
         format!("{}<'_>", struct_name)
     } else {
@@ -739,6 +777,7 @@ fn emit_struct_output(
 
 fn process_enum(
     e: syn::ItemEnum,
+    state: &str,
     output: &mut String,
     attr_name: &str,
     variant_prefix: &str,
@@ -749,7 +788,11 @@ fn process_enum(
         return;
     }
     let enum_name = e.ident.to_string();
-    let wit_case = enum_name.to_pascal_case();
+    let wit_case = if state == "play" {
+        enum_name.to_pascal_case()
+    } else {
+        format!("{}{}", state, enum_name).to_pascal_case()
+    };
     let enum_name_with_lt = if !e.generics.params.is_empty() {
         format!("{}<'_>", enum_name)
     } else {
