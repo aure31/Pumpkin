@@ -279,15 +279,9 @@ fn convert_value(
                         prep_prefix, path, src, path
                     ));
                     if is_ref {
-                        format!(
-                            "&vec_{}",
-                            prep_prefix
-                        )
+                        format!("&vec_{}", prep_prefix)
                     } else {
-                        format!(
-                            "vec_{}",
-                            prep_prefix
-                        )
+                        format!("vec_{}", prep_prefix)
                     }
                 } else {
                     if is_ref {
@@ -295,41 +289,23 @@ fn convert_value(
                             "            let var_long_{} = {}({}.try_into().unwrap());\n",
                             prep_prefix, path, src
                         ));
-                        format!(
-                            "&var_long_{}",
-                            prep_prefix
-                        )
+                        format!("&var_long_{}", prep_prefix)
                     } else {
-                        format!(
-                            "{}({}.try_into().unwrap())",
-                            path,src
-                        )
+                        format!("{}({}.try_into().unwrap())", path, src)
                     }
                 }
             } else if mode == MappingMode::Deserialize {
                 if is_slice {
-                    format!(
-                        "{}.iter().map(|v| v.0 as _).collect()",
-                        src
-                    )
+                    format!("{}.iter().map(|v| v.0 as _).collect()", src)
                 } else {
-                    format!(
-                        "{}.0.try_into().unwrap()",
-                        src
-                    )
+                    format!("{}.0.try_into().unwrap()", src)
                 }
             } else {
                 // ToWit
                 if is_slice {
-                    format!(
-                        "{}.iter().map(|v| v.0 as _).collect()",
-                        src
-                    )
+                    format!("{}.iter().map(|v| v.0 as _).collect()", src)
                 } else {
-                    format!(
-                        "{}.0.try_into().unwrap()",
-                        src
-                    )
+                    format!("{}.0.try_into().unwrap()", src)
                 }
             }
         }
@@ -615,7 +591,6 @@ fn process_struct(
                 mode,
                 "            ",
             );
-
 
             if !ok {
                 possible = false;
