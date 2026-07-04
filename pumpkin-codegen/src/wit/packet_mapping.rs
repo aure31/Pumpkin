@@ -22,15 +22,21 @@ pub fn build_java_mapping() -> String {
     output.push_str("pub fn serialize_java_packet(packet: &ClientboundPacket, version: JavaMinecraftVersion) -> Option<Bytes> {\n");
     output.push_str("    match packet {\n");
 
-    process_packets(
-        "../pumpkin-protocol/src/java/client/play",
-        &mut output,
-        "java_packet",
-        "ClientboundPacket",
-        "pumpkin_protocol::java::client::play",
-        false,
-        MappingMode::Serialize,
-    );
+    let client_states = &["config", "login", "play", "status"];
+    let server_states = &["config", "handshake", "login", "play", "status"];
+
+    for state in client_states {
+        process_packets(
+            &format!("../pumpkin-protocol/src/java/client/{}", state),
+            state,
+            &mut output,
+            "java_packet",
+            "ClientboundPacket",
+            &format!("pumpkin_protocol::java::client::{}", state),
+            false,
+            MappingMode::Serialize,
+        );
+    }
 
     output.push_str("        _ => None,\n");
     output.push_str("    }\n");
@@ -40,15 +46,18 @@ pub fn build_java_mapping() -> String {
     output.push_str("pub fn deserialize_java_serverbound_packet(id: i32, payload: &[u8], version: JavaMinecraftVersion) -> Option<ServerboundPacket> {\n");
     output.push_str("    match id {\n");
 
-    process_packets(
-        "../pumpkin-protocol/src/java/server/play",
-        &mut output,
-        "java_packet",
-        "ServerboundPacket",
-        "pumpkin_protocol::java::server::play",
-        false,
-        MappingMode::Deserialize,
-    );
+    for state in server_states {
+        process_packets(
+            &format!("../pumpkin-protocol/src/java/server/{}", state),
+            state,
+            &mut output,
+            "java_packet",
+            "ServerboundPacket",
+            &format!("pumpkin_protocol::java::server::{}", state),
+            false,
+            MappingMode::Deserialize,
+        );
+    }
 
     output.push_str("        _ => None,\n");
     output.push_str("    }\n");
@@ -58,29 +67,35 @@ pub fn build_java_mapping() -> String {
     output.push_str("    fn to_wit(&self) -> ClientboundPacket;\n");
     output.push_str("}\n\n");
 
-    process_packets(
-        "../pumpkin-protocol/src/java/client/play",
-        &mut output,
-        "java_packet",
-        "ClientboundPacket",
-        "pumpkin_protocol::java::client::play",
-        false,
-        MappingMode::ToWit,
-    );
+    for state in client_states {
+        process_packets(
+            &format!("../pumpkin-protocol/src/java/client/{}", state),
+            state,
+            &mut output,
+            "java_packet",
+            "ClientboundPacket",
+            &format!("pumpkin_protocol::java::client::{}", state),
+            false,
+            MappingMode::ToWit,
+        );
+    }
 
     output.push_str("#[must_use]\n");
     output.push_str(
         "pub fn clientbound_java_any_to_wit(any: &dyn Any) -> Option<ClientboundPacket> {\n",
     );
-    process_packets(
-        "../pumpkin-protocol/src/java/client/play",
-        &mut output,
-        "java_packet",
-        "ClientboundPacket",
-        "pumpkin_protocol::java::client::play",
-        false,
-        MappingMode::Downcast,
-    );
+    for state in client_states {
+        process_packets(
+            &format!("../pumpkin-protocol/src/java/client/{}", state),
+            state,
+            &mut output,
+            "java_packet",
+            "ClientboundPacket",
+            &format!("pumpkin_protocol::java::client::{}", state),
+            false,
+            MappingMode::Downcast,
+        );
+    }
     output.push_str("    None\n");
     output.push_str("}\n\n");
 
@@ -98,6 +113,7 @@ pub fn build_bedrock_mapping() -> String {
 
     process_packets(
         "../pumpkin-protocol/src/bedrock/client",
+        "",
         &mut output,
         "packet",
         "BClientboundPacket",
@@ -116,6 +132,7 @@ pub fn build_bedrock_mapping() -> String {
 
     process_packets(
         "../pumpkin-protocol/src/bedrock/server",
+        "",
         &mut output,
         "packet",
         "BServerboundPacket",
@@ -134,6 +151,7 @@ pub fn build_bedrock_mapping() -> String {
 
     process_packets(
         "../pumpkin-protocol/src/bedrock/client",
+        "",
         &mut output,
         "packet",
         "BClientboundPacket",
@@ -148,6 +166,7 @@ pub fn build_bedrock_mapping() -> String {
     );
     process_packets(
         "../pumpkin-protocol/src/bedrock/client",
+        "",
         &mut output,
         "packet",
         "BClientboundPacket",
@@ -245,7 +264,75 @@ fn convert_value(
             }
             MappingMode::Downcast => String::new(),
         },
+        "VarLong" | "VarULong" => {
+            let is_ulong = type_ident == "VarULong";
+            let path = if is_ulong {
+                "pumpkin_protocol::codec::var_ulong::VarULong"
+            } else {
+                "pumpkin_protocol::codec::var_long::VarLong"
+            };
 
+            if mode == MappingMode::Serialize {
+                if is_slice {
+                    prep.push_str(&format!(
+                        "            let vec_{}: Vec<{}> = {}.iter().map(|v| {}(*v as _)).collect();\n",
+                        prep_prefix, path, src, path
+                    ));
+                    if is_ref {
+                        format!(
+                            "&vec_{}",
+                            prep_prefix
+                        )
+                    } else {
+                        format!(
+                            "vec_{}",
+                            prep_prefix
+                        )
+                    }
+                } else {
+                    if is_ref {
+                        prep.push_str(&format!(
+                            "            let var_long_{} = {}({}.try_into().unwrap());\n",
+                            prep_prefix, path, src
+                        ));
+                        format!(
+                            "&var_long_{}",
+                            prep_prefix
+                        )
+                    } else {
+                        format!(
+                            "{}({}.try_into().unwrap())",
+                            path,src
+                        )
+                    }
+                }
+            } else if mode == MappingMode::Deserialize {
+                if is_slice {
+                    format!(
+                        "{}.iter().map(|v| v.0 as _).collect()",
+                        src
+                    )
+                } else {
+                    format!(
+                        "{}.0.try_into().unwrap()",
+                        src
+                    )
+                }
+            } else {
+                // ToWit
+                if is_slice {
+                    format!(
+                        "{}.iter().map(|v| v.0 as _).collect()",
+                        src
+                    )
+                } else {
+                    format!(
+                        "{}.0.try_into().unwrap()",
+                        src
+                    )
+                }
+            }
+        }
         "TextComponent" => match mode {
             MappingMode::Serialize => {
                 let tmp = dst.unwrap_or("tmp").replace('.', "_");
@@ -393,6 +480,7 @@ fn convert_value(
 
 fn process_packets(
     dir: &str,
+    state: &str,
     output: &mut String,
     attr_name: &str,
     variant_prefix: &str,
@@ -413,6 +501,7 @@ fn process_packets(
             }
             process_packets(
                 path.to_str().unwrap(),
+                state,
                 output,
                 attr_name,
                 variant_prefix,
@@ -427,6 +516,7 @@ fn process_packets(
         {
             parse_packet_file(
                 &path,
+                state,
                 output,
                 attr_name,
                 variant_prefix,
@@ -439,6 +529,7 @@ fn process_packets(
 
 fn parse_packet_file(
     path: &Path,
+    state: &str,
     output: &mut String,
     attr_name: &str,
     variant_prefix: &str,
@@ -486,6 +577,10 @@ fn process_struct(
 
     if let Fields::Named(fields) = s.fields {
         for field in fields.named {
+            if !matches!(field.vis, syn::Visibility::Public(_)) {
+                possible = false;
+                break;
+            }
             let mut field_name = field.ident.as_ref().unwrap().to_string();
             let wit_field = field_name.to_snake_case();
             let (type_ident, is_ref, is_slice) = get_type_info(&field.ty);
@@ -494,7 +589,7 @@ fn process_struct(
                 if mode == MappingMode::Serialize {
                     field_inits.push_str(&format!("                {}: &[],\n", field_name));
                 } else {
-                    possible = false;
+                    possible = false; // Cannot handle DynamicRecipe yet
                 }
                 continue;
             }
@@ -503,7 +598,7 @@ fn process_struct(
                 field_name = "r#type".to_string();
             }
 
-            // source selon le mode
+            // source that depend on the mode
             let src = match mode {
                 MappingMode::Serialize => format!("data.{}", wit_field),
                 MappingMode::Deserialize => format!("p.{}", field_name),
@@ -520,6 +615,7 @@ fn process_struct(
                 mode,
                 "            ",
             );
+
 
             if !ok {
                 possible = false;
@@ -539,22 +635,20 @@ fn process_struct(
         possible = false;
     }
 
-    if !possible {
-        return;
+    if possible {
+        emit_struct_output(
+            output,
+            mode,
+            attr_name,
+            variant_prefix,
+            rust_path_prefix,
+            &struct_name,
+            &struct_name_with_lt,
+            &wit_case,
+            &prep_code,
+            &field_inits,
+        );
     }
-
-    emit_struct_output(
-        output,
-        mode,
-        attr_name,
-        variant_prefix,
-        rust_path_prefix,
-        &struct_name,
-        &struct_name_with_lt,
-        &wit_case,
-        &prep_code,
-        &field_inits,
-    );
 }
 
 fn emit_struct_output(

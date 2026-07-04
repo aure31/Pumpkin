@@ -1,6 +1,7 @@
 use crate::wit::utils::map_type;
 use heck::ToKebabCase;
 use semver::Version;
+use std::collections::HashSet;
 use std::{fs, path::Path};
 use syn::{Fields, Item};
 use wit_encoder::{
@@ -21,19 +22,31 @@ pub fn build() -> String {
 
     let mut serverbound_variant = Variant::empty();
     let mut clientbound_variant = Variant::empty();
+    let mut serverbound_cases = HashSet::new();
+    let mut clientbound_cases = HashSet::new();
 
     // Process serverbound packets
-    process_packets(
-        "../pumpkin-protocol/src/java/server/play",
-        &mut interface,
-        &mut serverbound_variant,
-    );
+    let server_states = &["config", "handshake", "login", "play", "status"];
+    for state in server_states {
+        process_packets(
+            &format!("../pumpkin-protocol/src/java/server/{}", state),
+            state,
+            &mut interface,
+            &mut serverbound_variant,
+            &mut serverbound_cases,
+        );
+    }
     // Process clientbound packets
-    process_packets(
-        "../pumpkin-protocol/src/java/client/play",
-        &mut interface,
-        &mut clientbound_variant,
-    );
+    let client_states = &["config", "login", "play", "status"];
+    for state in client_states {
+        process_packets(
+            &format!("../pumpkin-protocol/src/java/client/{}", state),
+            state,
+            &mut interface,
+            &mut clientbound_variant,
+            &mut clientbound_cases,
+        );
+    }
 
     // Add an 'unknown' fallback variant (no payload) — raw payload is carried on the event record
     serverbound_variant.case(VariantCase::empty("unknown"));
@@ -52,7 +65,13 @@ pub fn build() -> String {
     package.to_string()
 }
 
-fn process_packets(dir: &str, interface: &mut Interface, variant: &mut Variant) {
+fn process_packets(
+    dir: &str,
+    state: &str,
+    interface: &mut Interface,
+    variant: &mut Variant,
+    defined_cases: &mut HashSet<String>,
+) {
     let paths = fs::read_dir(dir).expect("Failed to read packet directory");
     let mut sorted_paths: Vec<_> = paths
         .map(|e| e.expect("Failed to read entry").path())
@@ -63,24 +82,39 @@ fn process_packets(dir: &str, interface: &mut Interface, variant: &mut Variant) 
         if path.extension().is_some_and(|ext| ext == "rs")
             && path.file_name().is_some_and(|name| name != "mod.rs")
         {
-            parse_packet_file(&path, interface, variant);
+            parse_packet_file(&path, state, interface, variant, defined_cases);
         }
     }
 }
 
-fn extract_type_name(ty: &syn::Type) -> String {
-    match ty {
-        syn::Type::Path(p) => p.path.segments.last().unwrap().ident.to_string(),
-        syn::Type::Reference(r) => match &*r.elem {
-            syn::Type::Slice(s) => match &*s.elem {
-                syn::Type::Path(p) => p.path.segments.last().unwrap().ident.to_string(),
-                _ => String::new(),
-            },
-            syn::Type::Path(p) => p.path.segments.last().unwrap().ident.to_string(),
-            _ => String::new(),
-        },
-        _ => String::new(),
+fn parse_packet_file(
+    path: &Path,
+    state: &str,
+    interface: &mut Interface,
+    variant: &mut Variant,
+    defined_cases: &mut HashSet<String>,
+) {
+    let content = fs::read_to_string(path).expect("Failed to read file");
+    let file = syn::parse_file(&content).expect("Failed to parse file");
+
+    for item in file.items {
+        match item {
+            Item::Struct(s) if has_java_packet_attr(&s.attrs) => {
+                process_struct(s, state, interface, variant, defined_cases);
+            }
+            Item::Enum(e) if has_java_packet_attr(&e.attrs) => {
+                process_enum(e, state, interface, variant, defined_cases);
+            }
+            _ => {}
+        }
     }
+}
+
+#[inline]
+#[must_use]
+/// Check for `#[java_packet]` attribute
+fn has_java_packet_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident("java_packet"))
 }
 
 #[inline]
@@ -107,13 +141,6 @@ fn register_wit_type(
     }
 }
 
-#[inline]
-#[must_use]
-/// Check for `#[java_packet]` attribute
-fn has_java_packet_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident("java_packet"))
-}
-
 fn collect_types(
     fields: syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
 ) -> Vec<WitType> {
@@ -138,9 +165,25 @@ fn collect_fields(
         .collect()
 }
 
-fn process_struct(s: syn::ItemStruct, interface: &mut Interface, variant: &mut Variant) {
-    let wit_name = s.ident.to_string().to_kebab_case();
+fn wit_name(name: String,state: &str) -> String{
+    if state == "play" {
+        name.to_kebab_case()
+    } else {
+        format!("{}-{}", state, name.to_kebab_case())
+    }
+}
 
+fn process_struct(
+    s: syn::ItemStruct,
+    state: &str,
+    interface: &mut Interface,
+    variant: &mut Variant,
+    defined_cases: &mut HashSet<String>,
+) {
+    let wit_name = wit_name(s.ident.to_string(),state);
+    if !defined_cases.insert(wit_name.clone()) {
+        return;
+    }
     let fields_list = match s.fields {
         Fields::Named(fields) => collect_fields(fields.named),
         _ => Vec::new(),
@@ -149,8 +192,17 @@ fn process_struct(s: syn::ItemStruct, interface: &mut Interface, variant: &mut V
     register_wit_type(wit_name, fields_list, interface, variant, None);
 }
 
-fn process_enum(e: syn::ItemEnum, interface: &mut Interface, variant: &mut Variant) {
-    let enum_wit_name = e.ident.to_string().to_kebab_case();
+fn process_enum(
+    e: syn::ItemEnum,
+    state: &str,
+    interface: &mut Interface,
+    variant: &mut Variant,
+    defined_cases: &mut HashSet<String>,
+) {
+    let enum_wit_name = wit_name(e.ident.to_string(),state);
+    if !defined_cases.insert(enum_wit_name.clone()) {
+        return;
+    }
     let mut cases = Vec::new();
 
     for v in e.variants {
@@ -208,19 +260,17 @@ fn process_enum(e: syn::ItemEnum, interface: &mut Interface, variant: &mut Varia
     }
 }
 
-fn parse_packet_file(path: &Path, interface: &mut Interface, variant: &mut Variant) {
-    let content = fs::read_to_string(path).expect("Failed to read file");
-    let file = syn::parse_file(&content).expect("Failed to parse file");
-
-    for item in file.items {
-        match item {
-            Item::Struct(s) if has_java_packet_attr(&s.attrs) => {
-                process_struct(s, interface, variant);
-            }
-            Item::Enum(e) if has_java_packet_attr(&e.attrs) => {
-                process_enum(e, interface, variant);
-            }
-            _ => {}
-        }
+fn extract_type_name(ty: &syn::Type) -> String {
+    match ty {
+        syn::Type::Path(p) => p.path.segments.last().unwrap().ident.to_string(),
+        syn::Type::Reference(r) => match &*r.elem {
+            syn::Type::Slice(s) => match &*s.elem {
+                syn::Type::Path(p) => p.path.segments.last().unwrap().ident.to_string(),
+                _ => String::new(),
+            },
+            syn::Type::Path(p) => p.path.segments.last().unwrap().ident.to_string(),
+            _ => String::new(),
+        },
+        _ => String::new(),
     }
 }
