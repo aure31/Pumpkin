@@ -43,8 +43,8 @@ use crate::{
     plugin::{
         block::block_break::BlockBreakEvent,
         player::{
-            player_join::PlayerJoinEvent, player_leave::PlayerLeaveEvent,
-            player_respawn::PlayerRespawnEvent,
+            player_change_world::PlayerChangeWorldEvent, player_join::PlayerJoinEvent,
+            player_leave::PlayerLeaveEvent, player_respawn::PlayerRespawnEvent,
         },
     },
     server::Server,
@@ -64,7 +64,7 @@ use pumpkin_data::fluid::{Falling, FluidProperties, FluidState};
 use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::tracked_data::TrackedData;
 use pumpkin_data::{
-    Block,
+    Block, BlockStateId,
     entity::{EntityStatus, EntityType},
     fluid::Fluid,
     item_stack::ItemStack,
@@ -133,7 +133,7 @@ use pumpkin_util::{
 use pumpkin_world::inventory::Clearable;
 use pumpkin_world::world::{GetBlockError, WorldPortalExt};
 use pumpkin_world::{
-    BlockStateId, CURRENT_BEDROCK_MC_VERSION, biome, chunk::io::Dirtiable, inventory::Inventory,
+    CURRENT_BEDROCK_MC_VERSION, biome, chunk::io::Dirtiable, inventory::Inventory,
 };
 use pumpkin_world::{chunk::ChunkData, world::BlockAccessor};
 use pumpkin_world::{level::Level, tick::TickPriority};
@@ -215,7 +215,7 @@ pub struct World {
     pub server: Weak<Server>,
     synced_block_event_queue: Mutex<Vec<BlockEvent>>,
     /// A map of unsent block changes, keyed by block position.
-    unsent_block_changes: Mutex<HashMap<BlockPos, u16>>,
+    unsent_block_changes: Mutex<HashMap<BlockPos, BlockStateId>>,
     /// POI storage for fast portal lookups
     pub portal_poi: Mutex<portal::PortalPoiStorage>,
     /// End Dragon fight manager (only present in `THE_END` dimension).
@@ -285,7 +285,7 @@ impl World {
         let generation_settings = GenerationSettings::from_dimension(&dimension);
 
         // Load portal POI from disk (PoiStorage::new automatically loads from disk if files exist)
-        let portal_poi = portal::PortalPoiStorage::new(&level.level_folder.root_folder);
+        let portal_poi = portal::PortalPoiStorage::new(level.level_folder.poi_folder.clone());
         let dragon_fight = (dimension.minecraft_name == Dimension::THE_END.minecraft_name)
             .then(|| Mutex::new(dragon_fight::DragonFight::new()));
         Self {
@@ -377,7 +377,6 @@ impl World {
         // First lets see if the entity was saved on an other chunk, and if the current chunk does not match we remove it
         // Otherwise we just update the nbt data
         let base_entity = entity.get_entity();
-        let uuid = base_entity.entity_uuid;
         let current_chunk_coordinate = base_entity.block_pos.load().chunk_position();
         let mut nbt = NbtCompound::new();
         entity.write_nbt(&mut nbt).await;
@@ -388,35 +387,19 @@ impl World {
             chunk.mark_dirty(true);
             let mut data = chunk.data.lock().await;
             if old_chunk == current_chunk_coordinate {
-                data.insert(uuid, nbt);
+                data.push(nbt);
                 return;
             }
 
             // The chunk has changed, lets remove the entity from the old chunk
-            data.remove(&uuid);
+            // TODO?
+            data.clear();
         }
         // We did not continue, so lets save data in a new chunk
         let chunk = self.level.get_entity_chunk(current_chunk_coordinate).await;
         let mut data = chunk.data.lock().await;
-        data.insert(uuid, nbt);
+        data.push(nbt);
         chunk.mark_dirty(true);
-    }
-
-    async fn remove_entity_data(&self, entity: &Entity) {
-        let current_chunk_coordinate = entity.block_pos.load().chunk_position();
-        if let Some(old_chunk) = entity.first_loaded_chunk_position.load() {
-            let old_chunk = old_chunk.to_vec2_i32();
-            let chunk = self.level.get_entity_chunk(old_chunk).await;
-            chunk.mark_dirty(true);
-            if old_chunk == current_chunk_coordinate {
-                chunk.data.lock().await.remove(&entity.entity_uuid);
-            } else {
-                let chunk = self.level.get_entity_chunk(current_chunk_coordinate).await;
-                // The chunk has changed, lets remove the entity from the old chunk
-                chunk.data.lock().await.remove(&entity.entity_uuid);
-                chunk.mark_dirty(true);
-            }
-        }
     }
 
     /// Sends an entity status update to all players tracking the specified entity.
@@ -494,7 +477,7 @@ impl World {
                     event.pos,
                     event.r#type,
                     event.data,
-                    VarInt(i32::from(block.id)),
+                    VarInt(block.id.as_u16() as i32),
                 ),
             );
         }
@@ -1074,7 +1057,7 @@ impl World {
                 let be_block_id = BlockState::to_be_network_id(block_state_id);
                 self.broadcast_to_chunk_editioned_sync(
                     chunk_pos,
-                    &CBlockUpdate::new(block_pos, i32::from(block_state_id).into()),
+                    &CBlockUpdate::new(block_pos, i32::from(block_state_id.as_u16()).into()),
                     &pumpkin_protocol::bedrock::client::CUpdateBlock::new(
                         block_pos,
                         be_block_id as u32,
@@ -1134,7 +1117,8 @@ impl World {
                 self.level.should_unload.store(true, Relaxed);
                 let cleaned_chunks = self.level.clean_memory();
                 if !cleaned_chunks.is_empty() {
-                    self.remove_entities_in_chunks(&cleaned_chunks);
+                    self.remove_entities_in_chunks(&cleaned_chunks).await;
+                    self.level.clean_entity_chunks(&cleaned_chunks);
                 }
                 // If autosave is configured and this tick will trigger an autosave, don't double notify
                 if self.level.autosave_ticks == 0 {
@@ -1385,11 +1369,11 @@ impl World {
                 let mut amplitude = 0.0;
 
                 if neighbor_height == 0.0 {
-                    let block_state_id = self.get_block_state_id(&pos);
-                    let block = Block::get_raw_id_from_state_id(block_state_id);
-                    let block_state = BlockState::from_id(block_state_id);
+                    let state_id = self.get_block_state_id(&pos);
+                    let block_id = state_id.to_block_id();
+                    let block_state = state_id.to_state();
 
-                    let blocks_movement = blocks_movement(block_state, block);
+                    let blocks_movement = blocks_movement(block_state, block_id);
 
                     if !blocks_movement {
                         let down_pos = pos.down();
@@ -3308,11 +3292,10 @@ impl World {
                 )
             };
 
-        // Get target world (may be different from current world for cross-dimension respawn)
-        let target_world = if respawn_dimension == self.dimension {
+        // Candidate destination world for a cross-dimension respawn.
+        let candidate_world = if respawn_dimension == self.dimension {
             None
         } else {
-            // Cross-dimension respawn: get target world from server
             self.server.upgrade().map_or_else(
                 || {
                     warn!("Could not get server for cross-dimension respawn");
@@ -3328,38 +3311,76 @@ impl World {
             )
         };
 
-        // Handle cross-dimension transfer if we found a different target world
-        let (target_world, position) = if let Some(ref new_world) = target_world {
-            debug!(
-                "Cross-dimension respawn: {} -> {}",
-                self.dimension.minecraft_name, new_world.dimension.minecraft_name
-            );
+        // Fire PlayerChangeWorldEvent (cancellable) before the transfer; it runs before
+        // the non-cancellable PlayerRespawnEvent, which observes the resolved world.
+        let (resolved_world, position, yaw, pitch) = if let Some(new_world) = candidate_world {
+            if let Some(server) = self.server.upgrade() {
+                let event = server
+                    .plugin_manager
+                    .fire(PlayerChangeWorldEvent {
+                        player: player.clone(),
+                        previous_world: self.clone(),
+                        new_world: new_world.clone(),
+                        position,
+                        yaw,
+                        pitch,
+                        cancelled: false,
+                    })
+                    .await;
 
-            // Remove player from current world
-            self.remove_player(player, false).await;
-            new_world.players.rcu(|current_list| {
-                let mut new_list = (**current_list).clone();
-                new_list.push(player.clone());
-                new_list
-            });
+                if event.cancelled {
+                    (None, position, yaw, pitch)
+                } else {
+                    let destination = event.new_world;
+                    let position = event.position;
+                    let yaw = event.yaw;
+                    let pitch = event.pitch;
 
-            // Update chunk manager to target world
-            player
-                .chunk_manager
-                .lock()
-                .await
-                .change_world(&self.level, new_world.clone());
+                    // Skip the transfer if redirected back to the current world.
+                    if destination.uuid != self.uuid {
+                        debug!(
+                            "Cross-dimension respawn: {} -> {}",
+                            self.dimension.minecraft_name, destination.dimension.minecraft_name
+                        );
 
-            // Unload watched chunks from current world
-            player.unload_watched_chunks(self).await;
+                        // Detach from the old world before publishing into the new one, so no
+                        // observer sees the player in a world whose chunk manager doesn't match.
+                        self.remove_player(player, false).await;
+                        player.unload_watched_chunks(self).await;
+                        player
+                            .chunk_manager
+                            .lock()
+                            .await
+                            .change_world(&self.level, destination.clone());
+                        player.living_entity.entity.set_world(destination.clone());
+                        destination.players.rcu(|current_list| {
+                            let mut new_list = (**current_list).clone();
+                            new_list.push(player.clone());
+                            new_list
+                        });
+                    }
 
-            (new_world.clone(), position)
+                    (Some(destination), position, yaw, pitch)
+                }
+            } else {
+                warn!("Server dropped during cross-dimension respawn");
+                (None, position, yaw, pitch)
+            }
+        } else {
+            if respawn_dimension != self.dimension {
+                warn!(
+                    "Target world {:?} not found, using world spawn in {:?}",
+                    respawn_dimension, self.dimension
+                );
+            }
+            (None, position, yaw, pitch)
+        };
+
+        // Cancelled or unresolved cross-dimension respawns fall back to the current
+        // world's spawn below; otherwise the resolved values from the event apply.
+        let (target_world, position, yaw, pitch) = if let Some(ref new_world) = resolved_world {
+            (new_world.clone(), position, yaw, pitch)
         } else if respawn_dimension != self.dimension {
-            // Cross-dimension failed - fall back to current world's spawn
-            warn!(
-                "Target world {:?} not found, using world spawn in {:?}",
-                respawn_dimension, self.dimension
-            );
             // FIXME: This spawn position calculation is incorrect. Should use vanilla's
             // proper spawn position calculation (see #1381).
             let chunk_pos = Vector2::new(spawn_x >> 4, spawn_z >> 4);
@@ -3370,9 +3391,9 @@ impl World {
                 (top + 1).into(),
                 f64::from(spawn_z) + 0.5,
             );
-            (self.clone(), fallback_pos)
+            (self.clone(), fallback_pos, spawn_yaw, spawn_pitch)
         } else {
-            (self.clone(), position)
+            (self.clone(), position, yaw, pitch)
         };
 
         // Notify plugins that the player has respawned (non-cancellable).
@@ -3526,6 +3547,7 @@ impl World {
         let mut entity_receiver = self.level.receive_entity_chunks(chunks);
         let level = self.level.clone();
         let world = self.clone();
+
         player.clone().spawn_task(async move {
             'main: loop {
                 let recv_result = tokio::select! {
@@ -3553,62 +3575,46 @@ impl World {
                         "Received chunk {:?}, but it is no longer watched... cleaning",
                         &position
                     );
-                    let mut ids_to_remove = Vec::new();
 
-                    for (uuid, entity_nbt) in chunk.data.lock().await.iter() {
-                        let Some(id) = entity_nbt.get_string("id") else {
-                            warn!("Entity has no ID");
-                            continue;
-                        };
-                        let Some(entity_type) =
-                            EntityType::from_name(id.strip_prefix("minecraft:").unwrap_or(id))
-                        else {
-                            warn!("Entity has no valid Entity Type {id}");
-                            continue;
-                        };
-                        // Pos is zero since it will read from nbt
-                        let entity =
-                            from_type(entity_type, Vector3::new(0.0, 0.0, 0.0), &world, *uuid);
-                        entity.read_nbt_non_mut(entity_nbt).await;
-                        let base_entity = entity.get_entity();
+                    if first_load {
+                        for entity_nbt in chunk.data.lock().await.iter() {
+                            let Some(id) = entity_nbt.get_string("id") else {
+                                continue;
+                            };
+                            let Some(entity_type) =
+                                EntityType::from_name(id.strip_prefix("minecraft:").unwrap_or(id))
+                            else {
+                                continue;
+                            };
 
-                        ids_to_remove.push(VarInt(base_entity.entity_id));
+                            let entity = from_type(
+                                entity_type,
+                                Vector3::new(0.0, 0.0, 0.0),
+                                &world,
+                                Uuid::new_v4(),
+                            );
+                            entity.read_nbt_non_mut(entity_nbt).await;
+                            let base_entity = entity.get_entity();
 
-                        if first_load {
                             let mut nbt = NbtCompound::new();
                             entity.write_nbt(&mut nbt).await;
+
                             if let Some(old_chunk) = base_entity.first_loaded_chunk_position.load()
                             {
                                 let old_chunk = old_chunk.to_vec2_i32();
                                 let chunk = world.level.get_entity_chunk(old_chunk).await;
                                 chunk.mark_dirty(true);
-                                let base_entity = entity.get_entity();
                                 let current_chunk_coordinate =
                                     base_entity.block_pos.load().chunk_position();
 
                                 let mut data = chunk.data.lock().await;
                                 if old_chunk == current_chunk_coordinate {
-                                    data.insert(*uuid, nbt);
+                                    data.push(nbt);
                                     continue;
                                 }
 
                                 // The chunk has changed, lets remove the entity from the old chunk
-                                data.remove(uuid);
-                            }
-                        }
-                    }
-                    if !ids_to_remove.is_empty() {
-                        match player.client.as_ref() {
-                            crate::net::ClientPlatform::Java(java) => {
-                                java.enqueue_packet(&CRemoveEntities::new(&ids_to_remove))
-                                    .await;
-                            }
-                            crate::net::ClientPlatform::Bedrock(bedrock) => {
-                                for id in &ids_to_remove {
-                                    bedrock
-                                        .enqueue_packet(&CRemoveActor::new(VarLong(id.0 as i64)))
-                                        .await;
-                                }
+                                data.clear();
                             }
                         }
                     }
@@ -3617,7 +3623,7 @@ impl World {
 
                 // Add all new Entities to the world
                 let mut entities_to_add: Vec<Arc<dyn EntityBase>> = Vec::new();
-                for (uuid, entity_nbt) in chunk.data.lock().await.iter() {
+                for entity_nbt in chunk.data.lock().await.iter() {
                     let Some(id) = entity_nbt.get_string("id") else {
                         debug!("Entity has no ID");
                         continue;
@@ -3629,29 +3635,17 @@ impl World {
                         continue;
                     };
 
-                    // Check if this entity already exists in the world (e.g. another player
-                    // is still online and tracking it). If so, just send the spawn packet
-                    // for the existing entity to the reconnecting player instead of
-                    // creating a duplicate with a different entity_id.
-                    let existing = world
-                        .entities
-                        .load()
-                        .iter()
-                        .find(|e| e.get_entity().entity_uuid == *uuid)
-                        .cloned();
-                    if let Some(existing_entity) = existing {
-                        let base_entity = existing_entity.get_entity();
-                        player
-                            .client
-                            .enqueue_packet(&base_entity.create_spawn_packet())
-                            .await;
-                        existing_entity.init_data_tracker().await;
-                        continue;
-                    }
-
                     // Pos is zero since it will read from nbt
-                    let entity = from_type(entity_type, Vector3::new(0.0, 0.0, 0.0), &world, *uuid);
+                    let entity = from_type(
+                        entity_type,
+                        Vector3::new(0.0, 0.0, 0.0),
+                        &world,
+                        Uuid::new_v4(),
+                    );
                     entity.read_nbt_non_mut(entity_nbt).await;
+
+                    entity.init_data_tracker().await;
+
                     let base_entity = entity.get_entity();
 
                     // Clear velocity so the client does not replay the drop animation.
@@ -3663,12 +3657,12 @@ impl World {
                         .client
                         .enqueue_packet(&base_entity.create_spawn_packet())
                         .await;
-                    entity.init_data_tracker().await;
 
                     if first_load {
                         entities_to_add.push(entity);
                     }
                 }
+
                 if first_load && !entities_to_add.is_empty() {
                     world.entities.rcu(|current_entities| {
                         let mut new_entities = (**current_entities).clone();
@@ -4152,7 +4146,7 @@ impl World {
         self.spawn_state.load().add_entity(self, entity.as_ref());
 
         let chunk = self.level.get_entity_chunk(chunk_coordinate).await;
-        chunk.data.lock().await.insert(base_entity.entity_uuid, nbt);
+        chunk.data.lock().await.push(nbt);
         chunk.mark_dirty(true);
 
         self.entities.rcu(|current_entities| {
@@ -4162,6 +4156,7 @@ impl World {
         });
     }
 
+    #[allow(clippy::unused_async)]
     pub async fn remove_entity(&self, entity: &dyn EntityBase) {
         let base_entity = entity.get_entity();
         self.spawn_state.load().remove_entity(self, entity);
@@ -4177,11 +4172,9 @@ impl World {
             &CRemoveEntities::new(&[base_entity.entity_id.into()]),
             &CRemoveActor::new(VarLong(base_entity.entity_id as i64)),
         );
-
-        self.remove_entity_data(base_entity).await;
     }
 
-    pub fn remove_entities_in_chunks(&self, chunks: &[Vector2<i32>]) {
+    pub async fn remove_entities_in_chunks(&self, chunks: &[Vector2<i32>]) {
         let chunks_set: FxHashSet<_> = chunks.iter().copied().collect();
         let mut entities_to_remove = Vec::new();
 
@@ -4201,9 +4194,8 @@ impl World {
         });
 
         for entity in entities_to_remove {
+            self.save_entity(&entity).await;
             self.spawn_state.load().remove_entity(self, entity.as_ref());
-            // Important: We do NOT call remove_entity_data here because we want the entities
-            // to persist in the chunk data on disk. We only remove them from the active world (RAM).
         }
 
         self.block_entities
@@ -4467,7 +4459,7 @@ impl World {
         position: &BlockPos,
         cause: Option<Arc<Player>>,
         flags: BlockFlags,
-    ) -> Option<u16> {
+    ) -> Option<BlockStateId> {
         let (broken_block, broken_block_state) = self.get_block_and_state_id(position);
         if is_air(broken_block_state) {
             return None;
@@ -4511,7 +4503,7 @@ impl World {
                 water_props.falling = Falling::False;
                 water_props.to_state_id(&Fluid::FLOWING_WATER)
             } else {
-                0
+                BlockStateId::AIR
             };
 
             let broken_state_id = self.set_block_state(position, new_state_id, flags).await;
@@ -4527,7 +4519,7 @@ impl World {
                 let particles_packet = CWorldEvent::new(
                     WorldEvent::ParticlesDestroyBlock as i32,
                     *position,
-                    broken_state_id.into(),
+                    broken_state_id.as_u16().into(),
                     false,
                 );
                 let chunk_pos = position.chunk_position();
@@ -4830,7 +4822,7 @@ impl World {
     }
 
     /// Gets the Block + state id from the Block Registry, Returns Air if the Block state has not been found
-    pub fn get_block_and_state_id(&self, position: &BlockPos) -> (&'static Block, u16) {
+    pub fn get_block_and_state_id(&self, position: &BlockPos) -> (&'static Block, BlockStateId) {
         let id = self.get_block_state_id(position);
         (Block::from_state_id(id), id)
     }
@@ -5405,11 +5397,16 @@ impl WorldPortalExt for WorldPortal {
         )
     }
 
-    fn mirror(&self, block: &Block, state_id: u16, mirror: Mirror) -> &'static BlockState {
+    fn mirror(&self, block: &Block, state_id: BlockStateId, mirror: Mirror) -> &'static BlockState {
         self.0.block_registry.mirror(block, state_id, mirror)
     }
 
-    fn rotate(&self, block: &Block, state_id: u16, rotation: Rotation) -> &'static BlockState {
+    fn rotate(
+        &self,
+        block: &Block,
+        state_id: BlockStateId,
+        rotation: Rotation,
+    ) -> &'static BlockState {
         self.0.block_registry.rotate(block, state_id, rotation)
     }
 
