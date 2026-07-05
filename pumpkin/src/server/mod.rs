@@ -205,7 +205,7 @@ impl Server {
             advanced_config.player_data.save_player_data,
         );
         let advancement_manager = Arc::new(AdvancementManager::new(
-            player_dir.clone(),
+            players_dir.clone(),
             advanced_config.advancement.save_advancements,
         ));
         let white_list = AtomicBool::new(basic_config.white_list);
