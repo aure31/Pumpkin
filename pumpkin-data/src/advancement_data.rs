@@ -238,4 +238,3 @@ impl AdvancementRequirement {
         self.requirements.iter().flatten().cloned().collect()
     }
 }
-pub trait Criterion {}

@@ -36,6 +36,7 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+pub mod advancement;
 pub mod block;
 pub mod command;
 pub mod crash;
