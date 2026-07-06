@@ -443,7 +443,7 @@ impl LootPoolEntryTypesExt for LootPoolEntryTypes {
     }
 }
 
-trait LootConditionExt {
+pub trait LootConditionExt {
     fn is_fulfilled(&self, params: &LootContextParameters) -> bool;
 }
 

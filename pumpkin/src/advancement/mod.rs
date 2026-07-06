@@ -1,59 +1,24 @@
-use crate::entity::EntityBase;
 use crate::entity::player::Player;
-use crate::entity::player::advancement::PlayerAdvancement;
-use crate::entity::predicate::EntityPredicate;
-use crate::world::loot::LootContextParameters;
-use dashmap::{DashMap, DashSet};
-use pumpkin_data::Advancement;
+use crate::world::loot::{LootConditionExt, LootContextParameters};
 use pumpkin_data::entity::EntityType;
-use pumpkin_util::identifier::Identifier;
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use pumpkin_data::Block;
+use pumpkin_util::loot_table::LootCondition;
 use std::sync::Arc;
-use uuid::Uuid;
+use pumpkin_data::item_stack::ItemStack;
 
-pub fn get_criterion(identifier: Identifier) {}
-
-pub struct Criterion<T>
-where
-    T: 'static + Clone + Debug + CriterionTriggerInstance,
-{
-    trigger: &'static CriterionTrigger<T>,
-    instance: &'static T,
+pub struct Criterion {
+    trigger: &'static CriterionTrigger,
+    instance: &'static CriterionTriggerInstance,
 }
 
-pub struct CriterionTrigger<T>
-where
-    T: 'static + Clone + Debug + CriterionTriggerInstance,
-{
-    players: DashMap<i32, DashSet<Listener<T>>>,
+pub struct CriterionTrigger {
+    id: &'static str,
 }
 
-impl<T> CriterionTrigger<T> {
-    fn add_player_listener(&mut self, player: i32, listener: Listener<T>) {
-        self.players
-            .entry(player)
-            .or_insert_with(HashSet::new)
-            .insert(listener);
-    }
-
-    fn remove_player_listener(&mut self, player: &i32, listener: Listener<T>) {
-        let listeners = self.players.get_mut(player);
-        if let Some(listeners) = listeners {
-            listeners.remove(&listener);
-            if listeners.is_empty() {
-                self.players.remove(player);
-            }
-        }
-    }
-
-    fn remove_player_listeners(&mut self, player: &i32) {
-        self.players.remove(player);
-    }
-
-    pub async fn trigger(&self, player: Arc<Player>, matcher: &dyn Fn(T) -> bool) {
+impl CriterionTrigger {
+    pub async fn trigger(&self, player: Arc<Player>, matcher: &dyn Fn(CriterionTriggerInstance) -> bool) {
         let advancement = player.advancements.lock().await;
-        let all_listeners = self.players.get(&player.entity_id());
+        let all_listeners = self.advancement.get(&player.entity_id());
         if let Some(all_listeners) = all_listeners
             && !all_listeners.is_empty()
         {
@@ -80,23 +45,59 @@ impl<T> CriterionTrigger<T> {
     }
 }
 
-pub struct Listener<T>
-where
-    T: 'static + Clone + Debug + CriterionTriggerInstance,
-{
-    trigger: &'static T,
-    advancement: &'static Advancement,
-    criterion: &'static str,
+pub enum CriterionTriggerInstanceTypes {
+    AnyBlockInteraction{
+        location: Option<ContextAwarePredicate>
+    },
+    BeeNestDestroy{
+        block: Option<Block>,
+        item: Option<ItemStack>
+
+    }
+
+
 }
 
-impl<T> Listener<T> {
-    pub fn run(&self, player: &mut PlayerAdvancement) {
-        player.award(self.advancement, self.criterion);
+impl CriterionTriggerInstanceTypes {
+    pub fn matches(&self, context: &LootContextParameters) -> bool {
+        match self {
+            Self::AnyBlockInteraction{ location } => {
+                location.is_empty() || location.unwrap().matches(context)
+            }
+        }
     }
 }
 
-pub trait CriterionTriggerInstance {
-    fn validate(ctx: LootContextParameters);
+pub struct CriterionTriggerInstance {
+    pub player_context: Option<ContextAwarePredicate>,
+    pub criterion_type: CriterionTriggerInstanceTypes,
+}
 
-    fn player() -> Option<LootItemCondition> ;
+impl CriterionTriggerInstance {
+
+    pub fn matches(&self, loot_context_parameters: &LootContextParameters) -> bool {
+
+    }
+
+}
+
+pub struct ContextAwarePredicate {
+    conditions: Vec<LootCondition>,
+}
+
+impl ContextAwarePredicate {
+    pub fn new(conditions: Vec<LootCondition>) -> Self {
+        Self {
+            conditions,
+        }
+    }
+
+    pub fn matches(&self, context:&LootContextParameters) ->bool{
+        for condition in &self.conditions {
+            if !condition.is_fulfilled(context)  {
+                return false;
+            }
+        }
+        true
+    }
 }

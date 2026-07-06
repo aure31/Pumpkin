@@ -1,5 +1,6 @@
 mod visibility_evaluator;
 
+use crate::advancement::{CriterionTrigger, CriterionTriggerInstance};
 use crate::data::advancement_data::AdvancementManager;
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -196,6 +197,8 @@ impl AdvancementProgressMap {
     }
 }
 
+pub struct TriggerInstanceKey(&'static Advancement, &'static str);
+
 /// Manages a player's collection of advancements.
 ///
 /// This handles saving, loading, and tracking the state of granted / revoked advancements.
@@ -208,6 +211,8 @@ pub struct PlayerAdvancement {
     pub manager: Arc<AdvancementManager>,
     pub path: PathBuf,
     pub last_selected_tab: Option<&'static Advancement>,
+    pub active_triggers:
+        HashMap<&'static str, HashMap<TriggerInstanceKey, &CriterionTriggerInstance>>,
     /// A weak reference to the player who owns these advancements.
     pub player: Weak<Player>,
 }
