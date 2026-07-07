@@ -79,7 +79,6 @@ use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_nbt::{compound::NbtCompound, to_bytes_unnamed};
 use pumpkin_protocol::bedrock::client::set_actor_data::{CSetActorData, PropertySyncData};
 use pumpkin_protocol::bedrock::client::start_game::{CStartGame, ServerTelemetryData};
-use pumpkin_protocol::bedrock::frame_set::FrameSet;
 use pumpkin_protocol::java::client::play::{
     CBlockUpdate, CChunkBatchEnd, CChunkBatchStart, CChunkData, CDisguisedChatMessage, CExplosion,
     CRespawn, CSetBlockDestroyStage, CWorldEvent, PlayerSpawnData,
@@ -2222,79 +2221,74 @@ impl World {
                 .await;
         };
 
-        let mut frame_set = FrameSet::default();
         client
-            .write_game_packet_to_set(
-                &CUpdateAttributes {
-                    runtime_id: VarULong(runtime_id),
-                    attributes: vec![
-                        Attribute {
-                            min_value: 0.0,
-                            max_value: 3.402_823_5E38,
-                            current_value: 0.1,
-                            default_min_value: 0.0,
-                            default_max_value: 3.402_823_5E38,
-                            default_value: 0.1,
-                            name: "minecraft:movement".to_string(),
-                            modifiers_list_size: VarUInt(0),
-                        },
-                        Attribute {
-                            min_value: 0.0,
-                            max_value: 3.402_823_5E38,
-                            current_value: 0.02,
-                            default_min_value: 0.0,
-                            default_max_value: 3.402_823_5E38,
-                            default_value: 0.02,
-                            name: "minecraft:underwater_movement".to_string(),
-                            modifiers_list_size: VarUInt(0),
-                        },
-                        Attribute {
-                            min_value: 0.0,
-                            max_value: 1.0,
-                            current_value: 0.08,
-                            default_min_value: 0.0,
-                            default_max_value: 1.0,
-                            default_value: 0.08,
-                            name: "minecraft:gravity".to_string(),
-                            modifiers_list_size: VarUInt(0),
-                        },
-                        Attribute {
-                            min_value: 0.0,
-                            max_value: 400.0,
-                            current_value: 400.0,
-                            default_min_value: 0.0,
-                            default_max_value: 400.0,
-                            default_value: 400.0,
-                            name: "minecraft:air".to_string(),
-                            modifiers_list_size: VarUInt(0),
-                        },
-                        Attribute {
-                            min_value: 0.0,
-                            max_value: 20.0,
-                            current_value: 20.0,
-                            default_min_value: 0.0,
-                            default_max_value: 20.0,
-                            default_value: 20.0,
-                            name: "minecraft:health".to_string(),
-                            modifiers_list_size: VarUInt(0),
-                        },
-                        Attribute {
-                            min_value: 0.0,
-                            max_value: 20.0,
-                            current_value: 20.0,
-                            default_min_value: 0.0,
-                            default_max_value: 20.0,
-                            default_value: 20.0,
-                            name: "minecraft:player.hunger".to_string(),
-                            modifiers_list_size: VarUInt(0),
-                        },
-                    ],
-                    player_tick: VarULong(0),
-                },
-                &mut frame_set,
-            )
+            .enqueue_packet_internal(&CUpdateAttributes {
+                runtime_id: VarULong(runtime_id),
+                attributes: vec![
+                    Attribute {
+                        min_value: 0.0,
+                        max_value: 3.402_823_5E38,
+                        current_value: 0.1,
+                        default_min_value: 0.0,
+                        default_max_value: 3.402_823_5E38,
+                        default_value: 0.1,
+                        name: "minecraft:movement".to_string(),
+                        modifiers_list_size: VarUInt(0),
+                    },
+                    Attribute {
+                        min_value: 0.0,
+                        max_value: 3.402_823_5E38,
+                        current_value: 0.02,
+                        default_min_value: 0.0,
+                        default_max_value: 3.402_823_5E38,
+                        default_value: 0.02,
+                        name: "minecraft:underwater_movement".to_string(),
+                        modifiers_list_size: VarUInt(0),
+                    },
+                    Attribute {
+                        min_value: 0.0,
+                        max_value: 1.0,
+                        current_value: 0.08,
+                        default_min_value: 0.0,
+                        default_max_value: 1.0,
+                        default_value: 0.08,
+                        name: "minecraft:gravity".to_string(),
+                        modifiers_list_size: VarUInt(0),
+                    },
+                    Attribute {
+                        min_value: 0.0,
+                        max_value: 400.0,
+                        current_value: 400.0,
+                        default_min_value: 0.0,
+                        default_max_value: 400.0,
+                        default_value: 400.0,
+                        name: "minecraft:air".to_string(),
+                        modifiers_list_size: VarUInt(0),
+                    },
+                    Attribute {
+                        min_value: 0.0,
+                        max_value: 20.0,
+                        current_value: 20.0,
+                        default_min_value: 0.0,
+                        default_max_value: 20.0,
+                        default_value: 20.0,
+                        name: "minecraft:health".to_string(),
+                        modifiers_list_size: VarUInt(0),
+                    },
+                    Attribute {
+                        min_value: 0.0,
+                        max_value: 20.0,
+                        current_value: 20.0,
+                        default_min_value: 0.0,
+                        default_max_value: 20.0,
+                        default_value: 20.0,
+                        name: "minecraft:player.hunger".to_string(),
+                        modifiers_list_size: VarUInt(0),
+                    },
+                ],
+                player_tick: VarULong(0),
+            })
             .await;
-        client.send_frame_set(frame_set, 0x84).await;
 
         // --- MULTIPLAYER BROADCASTING ---
 
@@ -2579,11 +2573,6 @@ impl World {
             client_suggestions::send_c_commands_packet(player, server, &command_dispatcher).await;
         };
 
-        // Spawn in initial chunks
-        // This is made before the player teleport so that the player doesn't glitch out when spawning
-        chunker::update_position(player).await;
-
-        // Teleport
         let (position, yaw, pitch) = if player.has_played_before.load(Ordering::Relaxed) {
             let position = player.position();
             let yaw = player.get_entity().yaw.load(); //info.spawn_angle;
@@ -2605,12 +2594,25 @@ impl World {
             (position, info.spawn_yaw, info.spawn_pitch)
         };
 
-        let velocity = player.get_entity().velocity.load();
+        // Load chunks around the real spawn position before teleporting the client there.
+        player.living_entity.entity.set_pos(position);
+        player.living_entity.entity.set_rotation(yaw, pitch);
+        player.living_entity.entity.last_pos.store(position);
+        chunker::update_position(player).await;
+
+        let center_chunk = player.living_entity.entity.chunk_pos.load();
+        let chunk = self
+            .level
+            .get_or_fetch_chunk(center_chunk, std::clone::Clone::clone)
+            .await;
+        client.send_packet_now(&CChunkBatchStart).await;
+        client.send_packet_now(&CChunkData(&chunk)).await;
+        client.send_packet_now(&CChunkBatchEnd::new(1u16)).await;
+
+        let velocity = player.living_entity.entity.velocity.load();
 
         debug!("Sending player teleport to {}", player.gameprofile.name);
         player.request_teleport(position, yaw, pitch).await;
-
-        player.get_entity().last_pos.store(position);
 
         let gameprofile = &player.gameprofile;
         let bedrock_player_list = CPlayerList {
