@@ -4,11 +4,26 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::Block;
 use pumpkin_util::loot_table::LootCondition;
 use std::sync::Arc;
+use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_util::math::bounds::IntBounds;
+use crate::entity::Entity;
 
 pub struct Criterion {
     trigger: &'static CriterionTrigger,
     instance: &'static CriterionTriggerInstance,
+}
+
+type EntityPredicate = dyn Fn(Entity) -> bool;
+
+pub trait Predicate<T> {
+    fn test(&self,predicate: T) -> bool;
+}
+
+pub struct ItemPredicate {
+    items: Vec<&'static Item>,
+    counts: IntBounds,
+    components: ComponentPredicate
 }
 
 pub struct CriterionTrigger {
@@ -51,8 +66,8 @@ pub enum CriterionTriggerInstanceTypes {
     },
     BeeNestDestroy{
         block: Option<Block>,
-        item: Option<ItemStack>
-
+        item: Option<ItemPredicate>,
+        bees_inside: IntBounds,
     }
 
 
