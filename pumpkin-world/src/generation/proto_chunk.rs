@@ -176,17 +176,28 @@ impl TerrainCache {
 
 impl ProtoChunk {
     #[must_use]
-    pub fn new(x: i32, z: i32, generator: &super::generator::VanillaGenerator) -> Self {
-        let dimension = &generator.dimension;
+    pub fn new(x: i32, z: i32, generator: &super::generator::WorldGenerator) -> Self {
+        let dimension = generator.dimension();
         let height = dimension.logical_height as u16;
         let section_count = (height as usize) / 16;
+
+        let default_block = match generator {
+            super::generator::WorldGenerator::Noise(noise_gen) => noise_gen.default_block,
+            super::generator::WorldGenerator::Flat(_) => Block::AIR.default_state,
+        };
+        let biome_mixer_seed = match generator {
+            super::generator::WorldGenerator::Noise(noise_gen) => noise_gen.biome_mixer_seed,
+            super::generator::WorldGenerator::Flat(flat_gen) => {
+                crate::biome::hash_seed(flat_gen.seed)
+            }
+        };
 
         let default_heightmap = [i16::MIN; CHUNK_AREA];
         Self {
             x,
             z,
-            default_block: generator.default_block,
-            biome_mixer_seed: generator.biome_mixer_seed,
+            default_block,
+            biome_mixer_seed,
             flat_block_map: vec![BlockStateId::AIR; CHUNK_AREA * height as usize]
                 .into_boxed_slice(),
             flat_biome_map: vec![
@@ -225,7 +236,7 @@ impl ProtoChunk {
     #[must_use]
     pub fn from_chunk_data(
         chunk_data: &ChunkData,
-        generator: &super::generator::VanillaGenerator,
+        generator: &super::generator::WorldGenerator,
     ) -> Self {
         let mut proto_chunk = Self::new(chunk_data.x, chunk_data.z, generator);
 
@@ -518,7 +529,6 @@ impl ProtoChunk {
     #[expect(clippy::too_many_lines)]
     pub fn step_to_noise(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::StructureReferences);
-
         let settings = generator.settings;
         let generation_shape = &settings.shape;
         let horizontal_cell_count = CHUNK_DIM / generation_shape.horizontal_cell_block_count();
@@ -717,7 +727,6 @@ impl ProtoChunk {
 
     pub fn step_to_carvers(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::Surface);
-
         super::carver::carve(self, generator);
 
         self.stage = StagedChunkEnum::Carvers;
@@ -1350,6 +1359,9 @@ impl ProtoChunk {
         );
 
         let mut references = Vec::new();
+        // Constant across every chunk in the dimension, so hoist it out of the loop
+        // and out of the (cached) structure-start computation below.
+        let chunk_min_y = self.bottom_y() as i32;
 
         for set in StructureSet::ALL {
             let mut candidate_chunks = Vec::new();
@@ -1396,26 +1408,43 @@ impl ProtoChunk {
                     for entry in set.structures {
                         let structure = Structure::get(&entry.structure);
 
-                        let context = StructureGeneratorContext {
-                            seed,
-                            chunk_x: candidate_chunk_x,
-                            chunk_z: candidate_chunk_z,
-                            random: create_chunk_random(seed, candidate_chunk_x, candidate_chunk_z),
-                            sea_level: settings.sea_level,
-                            min_y: self.bottom_y() as i32,
-                            height_sampler: Some(&mut height_sampler),
-                            structure_key: Some(entry.structure),
-                        };
+                        // A structure's placement depends only on its start chunk and the
+                        // world seed, so cache it: otherwise every surrounding chunk whose
+                        // references overlap it would re-run the (expensive) jigsaw
+                        // expansion. `context` is only built on a cache miss.
+                        let start_data = global_cache.get_or_compute_structure_start(
+                            entry.structure,
+                            candidate_chunk_x,
+                            candidate_chunk_z,
+                            || {
+                                let context = StructureGeneratorContext {
+                                    seed,
+                                    chunk_x: candidate_chunk_x,
+                                    chunk_z: candidate_chunk_z,
+                                    random: create_chunk_random(
+                                        seed,
+                                        candidate_chunk_x,
+                                        candidate_chunk_z,
+                                    ),
+                                    sea_level: settings.sea_level,
+                                    min_y: chunk_min_y,
+                                    height_sampler: Some(&mut height_sampler),
+                                    structure_key: Some(entry.structure),
+                                };
+                                lazily_generate_structure(
+                                    &entry.structure,
+                                    structure,
+                                    context,
+                                    &biome_supplier,
+                                    &mut multi_noise_sampler,
+                                )
+                            },
+                        );
 
-                        if let Some(start_data) = lazily_generate_structure(
-                            &entry.structure,
-                            structure,
-                            context,
-                            &biome_supplier,
-                            &mut multi_noise_sampler,
-                        ) && start_data
-                            .get_bounding_box()
-                            .intersects_raw_xz(start_x, start_z, end_x, end_z)
+                        if let Some(start_data) = start_data
+                            && start_data
+                                .get_bounding_box()
+                                .intersects_raw_xz(start_x, start_z, end_x, end_z)
                         {
                             references.push((entry.structure, start_data.collector.clone()));
                             break;

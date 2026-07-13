@@ -107,6 +107,14 @@ impl ItemEntity {
         }
     }
 
+    pub const fn get_item_stack(&self) -> &Mutex<ItemStack> {
+        &self.item_stack
+    }
+
+    pub const fn get_entity(&self) -> &Entity {
+        &self.entity
+    }
+
     async fn can_merge(&self) -> bool {
         if self.never_pickup.load(Ordering::Relaxed) || self.entity.removed.load(Ordering::Relaxed)
         {
@@ -462,11 +470,14 @@ impl EntityBase for ItemEntity {
 
     fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {
-            self.entity.send_meta_data(&[Metadata::new(
-                TrackedData::ITEM,
-                MetaDataType::ITEM_STACK,
-                &ItemStackSerializer::from(self.item_stack.lock().await.clone()),
-            )]);
+            self.entity.send_meta_data(
+                &[Metadata::new(
+                    TrackedData::ITEM,
+                    MetaDataType::ITEM_STACK,
+                    &ItemStackSerializer::from(self.item_stack.lock().await.clone()),
+                )],
+                None,
+            );
         })
     }
 
