@@ -66,11 +66,6 @@ impl CommandExecutor for QueryExecutor {
                 QueryMode::GameTime => level_time.query_gametime(),
                 QueryMode::Day => level_time.query_day(),
             };
-            let translation = match mode {
-                QueryMode::DayTime => translation::java::COMMANDS_TIME_QUERY_,
-                QueryMode::GameTime => translation::java::COMMANDS_TIME_QUERY_GAMETIME,
-                QueryMode::Day => translation::java::COMMANDS_TIME_QUERY_TIMELINE,
-            };
             sender
                 .send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_TIME_QUERY,
@@ -110,6 +105,7 @@ impl CommandExecutor for ChangeExecutor {
                 .first()
                 .expect("There should always be at least one world");
             let mut level_time = world.level_time.lock().await;
+
             match mode {
                 Mode::Add => {
                     // add
@@ -118,7 +114,7 @@ impl CommandExecutor for ChangeExecutor {
                     let curr_time = level_time.query_daytime();
                     sender
                         .send_message(TextComponent::translate_cross(
-                            translation::java::COMMANDS_TIME_SET_TIME_MARKER,
+                            translation::java::COMMANDS_TIME_SET,
                             translation::bedrock::COMMANDS_TIME_SET,
                             [TextComponent::text(curr_time.to_string())],
                         ))
