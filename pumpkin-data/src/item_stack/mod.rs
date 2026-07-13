@@ -184,6 +184,22 @@ impl ItemStack {
         }
         None
     }
+    #[must_use]
+    pub fn get_data_component_dyn(&self, id: &DataComponent) -> Option<&dyn DataComponentImpl> {
+        for (component_id, component) in &self.patch {
+            if component_id == id {
+                return component.as_ref().map(|c| c.as_ref());
+            }
+        }
+
+        for (component_id, component) in self.item.components {
+            if component_id == id {
+                return Some(*component);
+            }
+        }
+
+        None
+    }
 
     pub fn has_enchantments(&self) -> bool {
         self.get_data_component::<EnchantmentsImpl>()

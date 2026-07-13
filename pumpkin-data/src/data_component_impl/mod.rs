@@ -13,6 +13,8 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use std::any::Any;
 use std::borrow::Cow;
+use std::cmp::PartialEq;
+use std::iter::Iterator;
 
 pub trait DataComponentImpl: Send + Sync {
     fn write_data(&self) -> NbtTag {
@@ -457,6 +459,87 @@ impl EquipmentSlot {
             Self::Head(_) => 5,
             Self::Body(_) => 6,
             Self::Saddle(_) => 7,
+        }
+    }
+}
+
+enum EquipmentSlotGroup {
+    Any,
+    MainHand,
+    OffHand,
+    Hand,
+    Feet,
+    Legs,
+    Chest,
+    Head,
+    Armor,
+    Body,
+    Saddle,
+}
+
+impl EquipmentSlotGroup {
+    pub const fn test(&self, slot: &EquipmentSlot) -> bool {
+        match self {
+            Self::Any => true,
+            Self::MainHand => slot == &EquipmentSlot::MAIN_HAND,
+            Self::OffHand => slot == &EquipmentSlot::OFF_HAND,
+            Self::Hand => slot.slot_type() == EquipmentType::Hand,
+            Self::Feet => slot == &EquipmentSlot::FEET,
+            Self::Legs => slot == &EquipmentSlot::LEGS,
+            Self::Chest => slot == &EquipmentSlot::CHEST,
+            Self::Head => slot == &EquipmentSlot::HEAD,
+            Self::Armor => slot.is_armor_slot(),
+            Self::Body => slot == &EquipmentSlot::BODY,
+            Self::Saddle => slot == &EquipmentSlot::SADDLE,
+        }
+    }
+
+    const EQUIPMENT_SLOT_LIST: &'static [EquipmentSlot] = &[
+        EquipmentSlot::MAIN_HAND,
+        EquipmentSlot::OFF_HAND,
+        EquipmentSlot::FEET,
+        EquipmentSlot::LEGS,
+        EquipmentSlot::CHEST,
+        EquipmentSlot::HEAD,
+        EquipmentSlot::BODY,
+        EquipmentSlot::SADDLE,
+    ];
+
+    pub fn slots(&self) -> &[EquipmentSlot] {
+        match self {
+            Self::Any => Self::EQUIPMENT_SLOT_LIST,
+            Self::MainHand => &[EquipmentSlot::MAIN_HAND],
+            Self::OffHand => &[EquipmentSlot::OFF_HAND],
+            Self::Hand => &[EquipmentSlot::MAIN_HAND, EquipmentSlot::OFF_HAND],
+            Self::Feet => &[EquipmentSlot::FEET],
+            Self::Legs => &[EquipmentSlot::LEGS],
+            Self::Chest => &[EquipmentSlot::CHEST],
+            Self::Head => &[EquipmentSlot::HEAD],
+            Self::Armor => &[
+                EquipmentSlot::FEET,
+                EquipmentSlot::LEGS,
+                EquipmentSlot::CHEST,
+                EquipmentSlot::HEAD,
+                EquipmentSlot::BODY,
+            ],
+            Self::Body => &[EquipmentSlot::BODY],
+            Self::Saddle => &[EquipmentSlot::SADDLE],
+        }
+    }
+}
+
+impl From<EquipmentSlot> for EquipmentSlotGroup {
+    fn from(value: EquipmentSlot) -> Self {
+        match value {
+            EquipmentSlot::MAIN_HAND => Self::MainHand,
+            EquipmentSlot::OFF_HAND => Self::OffHand,
+            EquipmentSlot::HEAD => Self::Head,
+            EquipmentSlot::HEAD => Self::Armor,
+            EquipmentSlot::FEET => Self::Feet,
+            EquipmentSlot::LEGS => Self::Legs,
+            EquipmentSlot::CHEST => Self::Chest,
+            EquipmentSlot::BODY => Self::Body,
+            EquipmentSlot::SADDLE => Self::Saddle,
         }
     }
 }

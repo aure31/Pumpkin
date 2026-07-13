@@ -1,26 +1,61 @@
-use crate::entity::{Entity, NBTStorage};
-use pumpkin_data::data_component::DataComponent;
-use pumpkin_data::data_component::DataComponent::CustomData;
-use pumpkin_data::data_component_impl::{CustomDataImpl, DataComponentImpl};
+use crate::entity::NBTStorage;
+use crate::entity::attributes::ModifierOperation;
+use pumpkin_data::attributes::Attributes;
+use pumpkin_data::data_component_impl::{
+    CustomDataImpl, DataComponentImpl, EquipmentSlot, EquipmentSlotData,
+};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::NbtCompound;
-use pumpkin_util::math::bounds::IntBounds;
+use pumpkin_util::identifier::Identifier;
+use pumpkin_util::math::bounds::{DoubleBounds, IntBounds};
 use std::collections::HashMap;
 
 pub trait DataComponentPredicate {
-    fn matches(&self, components: ItemStack) -> bool;
+    fn matches(&self, components: &ItemStack) -> bool;
 }
 
 struct AnyValue<T: DataComponentImpl + 'static>(T);
 impl<T: DataComponentImpl + 'static> DataComponentPredicate for AnyValue<T> {
-    fn matches(&self, components: ItemStack) -> bool {
+    fn matches(&self, components: &ItemStack) -> bool {
         components.get_data_component::<T>().is_some()
     }
 }
 
+struct ModifierEntryPredicate {
+    attribute: Option<Vec<Attributes>>,
+    id: Option<Identifier>,
+    amount: DoubleBounds,
+    operation: Option<ModifierOperation>,
+    slot: Option<EquipmentSlotData>,
+}
+
+struct AttributeModifiersPredicate<T: DataComponentImpl + 'static> {
+    modifiers: Option<Vec<Entry, ModifierEntryPredicate>>,
+}
+impl<T: DataComponentImpl + 'static> DataComponentPredicate for AttributeModifiersPredicate<T> {
+    fn matches(&self, components: &ItemStack) -> bool {
+        if let Some(predicate) = self.modifiers {}
+    }
+}
+
 struct DataComponentExactPredicate {
-    expectedComponents: Vec<Box<dyn DataComponentImpl>>,
+    expected_components: Vec<Box<dyn DataComponentImpl>>,
+}
+
+impl DataComponentExactPredicate {
+    fn test(&self, actual_components: &ItemStack) -> bool {
+        for expected in &self.expected_components {
+            let actual = actual_components.get_data_component_dyn(&expected.get_self_enum());
+            if actual.is_none()
+                || actual.unwrap().get_self_enum() != expected.get_self_enum()
+                || !expected.equal(actual.unwrap())
+            {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 struct NbtPredicate(NbtCompound);
@@ -49,17 +84,35 @@ struct DataComponentMatcher<'a> {
     partial: HashMap<&'a dyn DataComponentImpl, &'a dyn DataComponentPredicate>,
 }
 
-impl<'a> DataComponentMatcher<'a> {
-    pub fn test(&self, item: ItemStack) -> bool {
-        if !self.exact.test(item) {
-            return false;
+impl DataComponentMatcher<'_> {
+    pub fn test(&self, item: &ItemStack) -> bool {
+        if self.exact.test(item) {
+            for &predicate in self.partial.values() {
+                if !predicate.matches(item) {
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
         }
-        for predicate in &self.partial.values() {}
     }
 }
 
 struct ItemPredicate<'a> {
-    items: Vec<&'static Item>,
-    counts: IntBounds,
+    items: Option<Vec<&'static Item>>,
+    count: IntBounds,
     components: DataComponentMatcher<'a>,
+}
+
+impl ItemPredicate<'_> {
+    pub fn test(&self, item: &ItemStack) -> bool {
+        if let Some(items) = &self.items
+            && !items.contains(&item.item)
+        {
+            false
+        } else {
+            self.count.matches(item.item_count as i32) && self.components.test(item)
+        }
+    }
 }
