@@ -478,7 +478,7 @@ enum EquipmentSlotGroup {
 }
 
 impl EquipmentSlotGroup {
-    pub const fn test(&self, slot: &EquipmentSlot) -> bool {
+    pub fn test(&self, slot: &EquipmentSlot) -> bool {
         match self {
             Self::Any => true,
             Self::MainHand => slot == &EquipmentSlot::MAIN_HAND,
@@ -531,15 +531,14 @@ impl EquipmentSlotGroup {
 impl From<EquipmentSlot> for EquipmentSlotGroup {
     fn from(value: EquipmentSlot) -> Self {
         match value {
-            EquipmentSlot::MAIN_HAND => Self::MainHand,
-            EquipmentSlot::OFF_HAND => Self::OffHand,
-            EquipmentSlot::HEAD => Self::Head,
-            EquipmentSlot::HEAD => Self::Armor,
-            EquipmentSlot::FEET => Self::Feet,
-            EquipmentSlot::LEGS => Self::Legs,
-            EquipmentSlot::CHEST => Self::Chest,
-            EquipmentSlot::BODY => Self::Body,
-            EquipmentSlot::SADDLE => Self::Saddle,
+            EquipmentSlot::MainHand(_) => Self::MainHand,
+            EquipmentSlot::OffHand(_) => Self::OffHand,
+            EquipmentSlot::Head(_) => Self::Head,
+            EquipmentSlot::Feet(_) => Self::Feet,
+            EquipmentSlot::Legs(_) => Self::Legs,
+            EquipmentSlot::Chest(_) => Self::Chest,
+            EquipmentSlot::Body(_) => Self::Body,
+            EquipmentSlot::Saddle(_) => Self::Saddle,
         }
     }
 }
