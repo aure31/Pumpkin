@@ -3,16 +3,16 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::data_component_impl::{
     AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, CustomDataImpl, DamageImpl,
     DataComponentImpl, EnchantmentsImpl, FireworkExplosionImpl, FireworkExplosionShape,
-    FireworksImpl, JukeboxPlayableImpl, Modifier, Operation, PotionContentsImpl,
+    FireworksImpl, JukeboxPlayableImpl, Modifier, Operation, PotionContentsImpl, TrimImpl,
+    VillagerVariantImpl, WritableBookContentImpl, WrittenBookContentImpl,
 };
-use pumpkin_data::fluid::Fluid;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::jukebox_song::JukeboxSong;
 use pumpkin_data::potion::Potion;
 use pumpkin_data::{AttributeModifierSlot, Enchantment};
 use pumpkin_nbt::NbtCompound;
-use pumpkin_util::math::bounds::{Bounds, DoubleBounds, IntBounds};
+use pumpkin_util::math::bounds::{DoubleBounds, IntBounds};
 use std::collections::HashMap;
 
 pub trait DataComponentPredicate {
@@ -176,7 +176,7 @@ struct DamagePredicate {
 impl DataComponentPredicate for DamagePredicate {
     fn matches(&self, components: &ItemStack) -> bool {
         let damage = components.get_data_component::<DamageImpl>();
-        damage.map_or(false, |damage| {
+        damage.is_some_and(|damage| {
             let max_damage = components.get_max_damage().unwrap_or(0);
             self.durability.matches(max_damage - damage.damage)
                 && self.damage.matches(damage.damage)
@@ -191,9 +191,9 @@ struct EnchantmentPredicate {
 
 impl EnchantmentPredicate {
     pub fn contained_in(&self, item_enchantments: &EnchantmentsImpl) -> bool {
-        if let Some(enchantments) = self.enchantments {
+        if let Some(enchantments) = &self.enchantments {
             for enchantment in enchantments {
-                if self.matchesEnchantment(item_enchantments, enchantment) {
+                if self.matches_enchantment(item_enchantments, enchantment) {
                     return true;
                 }
             }
@@ -206,7 +206,7 @@ impl EnchantmentPredicate {
             }
             false
         } else {
-            !item_enchantments.isEmpty()
+            !item_enchantments.enchantment.is_empty()
         }
     }
 
@@ -279,7 +279,7 @@ impl SingleComponentItemPredicate for FireworksPredicate {
     fn matches_type(&self, value: &Self::Component) -> bool {
         self.explosions
             .as_ref()
-            .is_none_or(|p| p.test(&value.explosions))
+            .is_none_or(|p| p.test(value.explosions.iter()))
             && self.flight_duration.matches(value.flight_duration)
     }
 }
@@ -293,6 +293,7 @@ impl SingleComponentItemPredicate for JukeboxPlayablePredicate {
 
     fn matches_type(&self, value: &Self::Component) -> bool {
         self.song
+            .as_ref()
             .is_none_or(|song| song.iter().any(|j| j.to_name() == value.song))
     }
 }
@@ -306,11 +307,69 @@ impl SingleComponentItemPredicate for PotionsPredicate {
 
     fn matches_type(&self, value: &Self::Component) -> bool {
         !value
-            .potion
-            .is_some_and(|potion| self.potions.contains(potion))
+            .potion_id
+            .is_some_and(|potion| self.potions.iter().any(|p| p.id == potion as u8))
     }
 }
 
+struct TrimPredicate {
+    material: Option<Vec<&'static str>>, //TODO use TrimMaterial when implemented
+    pattern: Option<Vec<&'static str>>,  //TODO use TrimPattern when implemented
+}
+
+impl SingleComponentItemPredicate for TrimPredicate {
+    type Component = TrimImpl;
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        false // TODO
+    }
+}
+
+struct VillagerTypePredicate {
+    villager_types: Vec<&'static str>,
+}
+
+impl SingleComponentItemPredicate for VillagerTypePredicate {
+    type Component = VillagerVariantImpl;
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        self.villager_types.contains(&value.value.as_ref())
+    }
+}
+
+struct WritableBookPredicate {
+    pages: Option<CollectionPredicate<String>>,
+}
+
+impl SingleComponentItemPredicate for WritableBookPredicate {
+    type Component = WritableBookContentImpl;
+
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        self.pages
+            .as_ref()
+            .is_none_or(|pages| pages.test(value.pages.iter()))
+    }
+}
+
+struct WrittenBookPredicate {
+    pages: Option<CollectionPredicate<String>>,
+    author: Option<String>,
+    title: Option<String>,
+    generation: IntBounds,
+    resolved: Option<bool>,
+}
+
+impl SingleComponentItemPredicate for WrittenBookPredicate {
+    type Component = WrittenBookContentImpl;
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        self.author.as_deref().is_none_or(|a| a == value.author)
+            && self.title.as_deref().is_none_or(|t| t == value.title)
+            && self.generation.matches(value.generation)
+            && self.resolved.is_none_or(|r| r == value.resolved)
+            && self
+                .pages
+                .as_ref()
+                .is_none_or(|p| p.test(value.pages.iter()))
+    }
+}
 struct DataComponentExactPredicate {
     expected_components: Vec<Box<dyn DataComponentImpl>>,
 }

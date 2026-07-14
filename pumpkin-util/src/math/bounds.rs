@@ -78,7 +78,10 @@ macro_rules! impl_square_cached_bounds {
 }
 
 impl IntBounds {
-    pub const ANY: Self = Self::from_bounds(Bounds::new(None, None));
+    pub const ANY: Self = Self {
+        bounds: Bounds::<i32>::new(None, None),
+        squared_bounds: Bounds::<i64>::new(None, None),
+    };
     /// Creates a new [`IntBounds`] with the provided [`Bounds`].
     pub fn from_bounds(bounds: Bounds<i32>) -> Self {
         Self {

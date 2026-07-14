@@ -426,7 +426,7 @@ impl Hash for UseCooldownImpl {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct PotionContentsImpl {
-    pub potion: Option<&'static Potion>,
+    pub potion_id: Option<i32>,
     pub custom_color: Option<i32>,
     pub custom_effects: Vec<StatusEffectInstance>,
     pub custom_name: Option<String>,

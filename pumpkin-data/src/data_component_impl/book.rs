@@ -7,10 +7,9 @@ pub struct WritableBookContentImpl {
 }
 impl WritableBookContentImpl {
     pub fn read_data(tag: &NbtTag) -> Option<Self> {
+        let compound = tag.extract_compound()?;
         let mut pages = Vec::new();
-        if let NbtTag::Compound(c) = tag
-            && let Some(NbtTag::List(l)) = c.get("pages")
-        {
+        if let Some(NbtTag::List(l)) = compound.get("pages") {
             for _ in l {
                 pages.push(String::new());
             }
@@ -25,18 +24,31 @@ impl DataComponentImpl for WritableBookContentImpl {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct WrittenBookContentImpl {
     pub pages: Vec<String>,
+    pub title: String,
+    pub author: String,
+    pub generation: i32,
+    pub resolved: bool,
 }
 impl WrittenBookContentImpl {
     pub fn read_data(tag: &NbtTag) -> Option<Self> {
+        let compound = tag.extract_compound()?;
         let mut pages = Vec::new();
-        if let NbtTag::Compound(c) = tag
-            && let Some(NbtTag::List(l)) = c.get("pages")
-        {
+        if let Some(NbtTag::List(l)) = compound.get("pages") {
             for _ in l {
                 pages.push(String::new());
             }
         }
-        Some(Self { pages })
+        let title = compound.get_string("title")?;
+        let author = compound.get_string("author")?;
+        let generation = compound.get_int("generation")?;
+        let resolved = compound.get_bool("resolved")?;
+        Some(Self {
+            pages,
+            title: title.to_owned(),
+            author: author.to_owned(),
+            generation,
+            resolved,
+        })
     }
 }
 impl DataComponentImpl for WrittenBookContentImpl {
