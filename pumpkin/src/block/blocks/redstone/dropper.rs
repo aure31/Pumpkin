@@ -5,8 +5,8 @@ use tokio::sync::Mutex;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
-    OnScheduledTickArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, GetComparatorOutputArgs, NormalUseArgs, OnNeighborUpdateArgs,
+    OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
 };
 use crate::entity::item::ItemEntity;
 use crate::entity::{Entity, EntityBase};
@@ -153,7 +153,6 @@ impl BlockBehaviour for DropperBlock {
     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if let Some(block_entity) = args.world.get_block_entity(args.position) {
-                // Safely extract the dropper instead of unwrap()
                 let Some(dropper) = block_entity.as_any().downcast_ref::<DropperBlockEntity>()
                 else {
                     return;
@@ -227,6 +226,21 @@ impl BlockBehaviour for DropperBlock {
                         0,
                     );
                 }
+            }
+        })
+    }
+
+    fn get_comparator_output<'a>(
+        &'a self,
+        args: GetComparatorOutputArgs<'a>,
+    ) -> BlockFuture<'a, Option<u8>> {
+        Box::pin(async move {
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(inventory) = block_entity.get_inventory()
+            {
+                Some(crate::block::calculate_comparator_output(inventory.as_ref()).await)
+            } else {
+                None
             }
         })
     }
