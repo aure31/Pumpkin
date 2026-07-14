@@ -1,28 +1,32 @@
 use crate::entity::NBTStorage;
-use pumpkin_data::AttributeModifierSlot;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::data_component_impl::{
-    AttributeModifiersImpl, CustomDataImpl, DataComponentImpl, Modifier, Operation,
+    AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, CustomDataImpl, DamageImpl,
+    DataComponentImpl, EnchantmentsImpl, FireworkExplosionImpl, FireworkExplosionShape,
+    FireworksImpl, JukeboxPlayableImpl, Modifier, Operation, PotionContentsImpl,
 };
+use pumpkin_data::fluid::Fluid;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::jukebox_song::JukeboxSong;
+use pumpkin_data::potion::Potion;
+use pumpkin_data::{AttributeModifierSlot, Enchantment};
 use pumpkin_nbt::NbtCompound;
-use pumpkin_util::math::bounds::{DoubleBounds, IntBounds};
+use pumpkin_util::math::bounds::{Bounds, DoubleBounds, IntBounds};
 use std::collections::HashMap;
 
 pub trait DataComponentPredicate {
     fn matches(&self, components: &ItemStack) -> bool;
 }
 
-pub trait DataComponentItemPredicate<T: DataComponentImpl + 'static> {
-    fn matches_type(&self, components: &T) -> bool;
+trait SingleComponentItemPredicate {
+    type Component: DataComponentImpl + 'static;
+    fn matches_type(&self, value: &Self::Component) -> bool;
 }
 
-impl<T: DataComponentImpl + 'static, G: DataComponentItemPredicate<T>> DataComponentPredicate
-    for G
-{
+impl<G: SingleComponentItemPredicate> DataComponentPredicate for G {
     fn matches(&self, components: &ItemStack) -> bool {
-        let value: Option<&T> = components.get_data_component();
+        let value: Option<&G::Component> = components.get_data_component();
         value.is_some() && self.matches_type(value.unwrap())
     }
 }
@@ -42,8 +46,8 @@ struct ModifierPredicate {
     slot: Option<AttributeModifierSlot>,
 }
 
-impl DataComponentItemPredicate<Modifier> for ModifierPredicate {
-    fn matches_type(&self, value: &Modifier) -> bool {
+impl ModifierPredicate {
+    fn test(&self, value: &Modifier) -> bool {
         self.attribute
             .as_ref()
             .is_none_or(|attribute| attribute.contains(&value.r#type))
@@ -129,14 +133,181 @@ impl<T: 'static> CollectionPredicate<T> {
 struct AttributeModifiersPredicate {
     modifiers: Option<CollectionPredicate<Modifier>>,
 }
-impl DataComponentPredicate for AttributeModifiersPredicate {
-    fn matches(&self, components: &ItemStack) -> bool {
-        let attributes = components
-            .get_data_component::<AttributeModifiersImpl>()
-            .unwrap();
+impl SingleComponentItemPredicate for AttributeModifiersPredicate {
+    type Component = AttributeModifiersImpl;
+    fn matches_type(&self, attributes: &AttributeModifiersImpl) -> bool {
         self.modifiers
             .as_ref()
             .is_none_or(|modifiers| modifiers.test(attributes.attribute_modifiers.iter()))
+    }
+}
+
+struct BundlePredicate {
+    items: Option<CollectionPredicate<ItemStack>>,
+}
+
+impl SingleComponentItemPredicate for BundlePredicate {
+    type Component = BundleContentsImpl;
+    fn matches_type(&self, content: &BundleContentsImpl) -> bool {
+        self.items
+            .as_ref()
+            .is_none_or(|items| items.test(content.items.iter()))
+    }
+}
+
+struct ContainerPredicate {
+    items: Option<CollectionPredicate<(u8, ItemStack)>>,
+}
+
+impl SingleComponentItemPredicate for ContainerPredicate {
+    type Component = ContainerImpl;
+    fn matches_type(&self, content: &ContainerImpl) -> bool {
+        self.items
+            .as_ref()
+            .is_none_or(|items| items.test(content.items.iter()))
+    }
+}
+
+struct DamagePredicate {
+    durability: IntBounds,
+    damage: IntBounds,
+}
+
+impl DataComponentPredicate for DamagePredicate {
+    fn matches(&self, components: &ItemStack) -> bool {
+        let damage = components.get_data_component::<DamageImpl>();
+        damage.map_or(false, |damage| {
+            let max_damage = components.get_max_damage().unwrap_or(0);
+            self.durability.matches(max_damage - damage.damage)
+                && self.damage.matches(damage.damage)
+        })
+    }
+}
+
+struct EnchantmentPredicate {
+    enchantments: Option<Vec<&'static Enchantment>>,
+    level: IntBounds,
+}
+
+impl EnchantmentPredicate {
+    pub fn contained_in(&self, item_enchantments: &EnchantmentsImpl) -> bool {
+        if let Some(enchantments) = self.enchantments {
+            for enchantment in enchantments {
+                if self.matchesEnchantment(item_enchantments, enchantment) {
+                    return true;
+                }
+            }
+            false
+        } else if self.level != IntBounds::ANY {
+            for &(_, level) in item_enchantments.enchantment.iter() {
+                if self.level.matches(level) {
+                    return true;
+                }
+            }
+            false
+        } else {
+            !item_enchantments.isEmpty()
+        }
+    }
+
+    fn matches_enchantment(
+        &self,
+        item_enchantments: &EnchantmentsImpl,
+        enchantment: &Enchantment,
+    ) -> bool {
+        let level = item_enchantments.get_level(enchantment);
+        level != 0 && (self.level == IntBounds::ANY || self.level.matches(level))
+    }
+}
+
+struct EnchantmentsPredicate {
+    enchantments: Vec<EnchantmentPredicate>,
+}
+impl SingleComponentItemPredicate for EnchantmentsPredicate {
+    type Component = EnchantmentsImpl;
+
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        for enchantment in &self.enchantments {
+            if !enchantment.contained_in(value) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+struct FireworkPredicate {
+    shape: Option<FireworkExplosionShape>,
+    twinkle: Option<bool>,
+    trail: Option<bool>,
+}
+
+impl FireworkPredicate {
+    pub fn test(&self, firework_explosion: &FireworkExplosionImpl) -> bool {
+        self.shape
+            .as_ref()
+            .is_none_or(|shape| shape == &firework_explosion.shape)
+            && self
+                .twinkle
+                .as_ref()
+                .is_none_or(|twinkle| twinkle == &firework_explosion.has_twinkle)
+            && self
+                .trail
+                .as_ref()
+                .is_none_or(|trail| trail == &firework_explosion.has_trail)
+    }
+}
+
+struct FireworkExplosionPredicate(FireworkPredicate);
+
+impl SingleComponentItemPredicate for FireworkExplosionPredicate {
+    type Component = FireworkExplosionImpl;
+
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        self.0.test(value)
+    }
+}
+
+struct FireworksPredicate {
+    explosions: Option<CollectionPredicate<FireworkExplosionImpl>>,
+    flight_duration: IntBounds,
+}
+
+impl SingleComponentItemPredicate for FireworksPredicate {
+    type Component = FireworksImpl;
+
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        self.explosions
+            .as_ref()
+            .is_none_or(|p| p.test(&value.explosions))
+            && self.flight_duration.matches(value.flight_duration)
+    }
+}
+
+struct JukeboxPlayablePredicate {
+    song: Option<Vec<&'static JukeboxSong>>,
+}
+
+impl SingleComponentItemPredicate for JukeboxPlayablePredicate {
+    type Component = JukeboxPlayableImpl;
+
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        self.song
+            .is_none_or(|song| song.iter().any(|j| j.to_name() == value.song))
+    }
+}
+
+struct PotionsPredicate {
+    potions: Vec<&'static Potion>,
+}
+
+impl SingleComponentItemPredicate for PotionsPredicate {
+    type Component = PotionContentsImpl;
+
+    fn matches_type(&self, value: &Self::Component) -> bool {
+        !value
+            .potion
+            .is_some_and(|potion| self.potions.contains(potion))
     }
 }
 
@@ -174,8 +345,8 @@ impl NbtPredicate {
     }
 }
 struct CustomDataPredicate(NbtPredicate);
-impl CustomDataPredicate {
-    pub fn matches(&self, item: &ItemStack) -> bool {
+impl DataComponentPredicate for CustomDataPredicate {
+    fn matches(&self, item: &ItemStack) -> bool {
         self.0.matches_item(item)
     }
 }

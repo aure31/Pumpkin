@@ -4,6 +4,7 @@ use crate::data_component_impl::{
     get_idor_hash, get_idset_hash, get_str_hash, put_idor,
 };
 use crate::effect::StatusEffect;
+use crate::potion::Potion;
 use crate::sound::Sound;
 use crc_fast::CrcAlgorithm::Crc32Iscsi;
 use crc_fast::Digest;
@@ -425,7 +426,7 @@ impl Hash for UseCooldownImpl {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct PotionContentsImpl {
-    pub potion_id: Option<i32>,
+    pub potion: Option<&'static Potion>,
     pub custom_color: Option<i32>,
     pub custom_effects: Vec<StatusEffectInstance>,
     pub custom_name: Option<String>,

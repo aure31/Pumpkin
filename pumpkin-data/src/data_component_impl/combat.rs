@@ -63,6 +63,13 @@ impl EnchantmentsImpl {
             enchantment: Cow::from(enc),
         })
     }
+
+    pub fn get_level(&self, enchant: &Enchantment) -> i32 {
+        self.enchantment
+            .iter()
+            .find_map(|&(cmp, lvl)| if cmp == enchant { Some(lvl) } else { None })
+            .unwrap_or_default()
+    }
 }
 impl DataComponentImpl for EnchantmentsImpl {
     fn write_data(&self) -> NbtTag {
