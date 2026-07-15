@@ -1,6 +1,7 @@
 use pumpkin_data::data_component_impl::DataComponentImpl;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_util::math::bounds::IntBounds;
+use std::marker::PhantomData;
 
 pub mod custom_predicate;
 pub mod data_components;
@@ -23,15 +24,27 @@ impl<G: SingleComponentItemPredicate> DataComponentPredicate for G {
 }
 
 pub trait Predicate {
-    type Target;
+    type Item;
     #[must_use]
-    fn test(&self, item: &Self::Target) -> bool;
+    fn test(&self, item: &Self::Item) -> bool;
 }
 
-impl<T, G: Fn(&T) -> bool> Predicate for G {
-    type Target = T;
-    fn test(&self, item: &Self::Target) -> bool {
+pub struct FnPredicate<F, T> {
+    f: F,
+    _marker: PhantomData<T>,
+}
+
+impl<F: Fn(&T) -> bool, T> Predicate for FnPredicate<F, T> {
+    type Item = T;
+    fn test(&self, item: &Self::Item) -> bool {
         self(item)
+    }
+}
+
+pub fn function<F: Fn(&T) -> bool, T>(f: F) -> FnPredicate<F, T> {
+    FnPredicate {
+        f,
+        _marker: PhantomData,
     }
 }
 
@@ -58,7 +71,7 @@ enum CollectionContentsPredicate<G: Predicate> {
 }
 
 impl<G: Predicate> CollectionContentsPredicate<G> {
-    pub fn test<'a>(&self, values: impl Iterator<Item = &'a G::Target> + Clone) -> bool {
+    pub fn test<'a>(&self, values: impl Iterator<Item = &'a G::Item> + Clone) -> bool {
         match self {
             Self::Multiple(predicates) => predicates
                 .iter()
@@ -92,7 +105,7 @@ struct CollectionPredicate<G: Predicate> {
 }
 
 impl<G: Predicate> CollectionPredicate<G> {
-    pub fn test<'a>(&self, values: impl Iterator<Item = &'a G::Target> + Clone) -> bool {
+    pub fn test<'a>(&self, values: impl Iterator<Item = &'a G::Item> + Clone) -> bool {
         self.contains
             .as_ref()
             .is_none_or(|contains| contains.test(values.clone()))

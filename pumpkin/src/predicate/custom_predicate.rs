@@ -18,7 +18,8 @@ pub struct ModifierPredicate {
     slot: Option<AttributeModifierSlot>,
 }
 
-impl Predicate<Modifier> for ModifierPredicate {
+impl Predicate for ModifierPredicate {
+    type Item = Modifier;
     fn test(&self, value: &Modifier) -> bool {
         self.attribute
             .as_ref()
@@ -76,7 +77,8 @@ pub struct FireworkPredicate {
     trail: Option<bool>,
 }
 
-impl Predicate<FireworkExplosionImpl> for FireworkPredicate {
+impl Predicate for FireworkPredicate {
+    type Item = FireworkExplosionImpl;
     fn test(&self, firework_explosion: &FireworkExplosionImpl) -> bool {
         self.shape
             .as_ref()

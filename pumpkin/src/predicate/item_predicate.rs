@@ -29,7 +29,8 @@ struct DataComponentMatcher<'a> {
     partial: HashMap<&'a dyn DataComponentImpl, &'a dyn DataComponentPredicate>,
 }
 
-impl Predicate<ItemStack> for DataComponentMatcher<'_> {
+impl Predicate for DataComponentMatcher<'_> {
+    type Item = ItemStack;
     fn test(&self, item: &ItemStack) -> bool {
         if self.exact.test(item) {
             for &predicate in self.partial.values() {
@@ -50,7 +51,8 @@ pub struct ItemPredicate<'a> {
     components: DataComponentMatcher<'a>,
 }
 
-impl Predicate<ItemStack> for ItemPredicate<'_> {
+impl Predicate for ItemPredicate<'_> {
+    type Item = ItemStack;
     fn test(&self, item: &ItemStack) -> bool {
         self.items
             .as_ref()
