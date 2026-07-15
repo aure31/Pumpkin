@@ -1,5 +1,6 @@
 use crate::data_component_impl::{DataComponentImpl, default_impl};
 use pumpkin_nbt::tag::NbtTag;
+use pumpkin_util::text::TextComponent;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct WritableBookContentImpl {
@@ -23,7 +24,7 @@ impl DataComponentImpl for WritableBookContentImpl {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct WrittenBookContentImpl {
-    pub pages: Vec<String>,
+    pub pages: Vec<TextComponent>,
     pub title: String,
     pub author: String,
     pub generation: i32,
@@ -35,7 +36,7 @@ impl WrittenBookContentImpl {
         let mut pages = Vec::new();
         if let Some(NbtTag::List(l)) = compound.get("pages") {
             for _ in l {
-                pages.push(String::new());
+                pages.push(TextComponent::empty());
             }
         }
         let title = compound.get_string("title")?;

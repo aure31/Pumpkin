@@ -1,4 +1,5 @@
 use crate::entity::NBTStorage;
+use crate::predicate::Predicate;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::data_component_impl::{
     CustomDataImpl, EnchantmentsImpl, FireworkExplosionImpl, FireworkExplosionShape, Modifier,
@@ -17,7 +18,7 @@ pub struct ModifierPredicate {
     slot: Option<AttributeModifierSlot>,
 }
 
-impl ModifierPredicate {
+impl Predicate<Modifier> for ModifierPredicate {
     fn test(&self, value: &Modifier) -> bool {
         self.attribute
             .as_ref()
@@ -38,6 +39,7 @@ pub struct EnchantmentPredicate {
 }
 
 impl EnchantmentPredicate {
+    #[must_use]
     pub fn contained_in(&self, item_enchantments: &EnchantmentsImpl) -> bool {
         if let Some(enchantments) = &self.enchantments {
             for enchantment in enchantments {
@@ -74,8 +76,8 @@ pub struct FireworkPredicate {
     trail: Option<bool>,
 }
 
-impl FireworkPredicate {
-    pub fn test(&self, firework_explosion: &FireworkExplosionImpl) -> bool {
+impl Predicate<FireworkExplosionImpl> for FireworkPredicate {
+    fn test(&self, firework_explosion: &FireworkExplosionImpl) -> bool {
         self.shape
             .as_ref()
             .is_none_or(|shape| shape == &firework_explosion.shape)
@@ -99,6 +101,7 @@ impl NbtPredicate {
         self.0 == output
     }
 
+    #[must_use]
     pub fn matches_item(&self, item: &ItemStack) -> bool {
         let data: Option<&CustomDataImpl> = item.get_data_component();
         self.0.is_empty() || data.is_some_and(|data| data.data == self.0)

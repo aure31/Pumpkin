@@ -1,4 +1,4 @@
-use crate::predicate::DataComponentPredicate;
+use crate::predicate::{DataComponentPredicate, Predicate};
 use pumpkin_data::data_component_impl::DataComponentImpl;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -29,8 +29,8 @@ struct DataComponentMatcher<'a> {
     partial: HashMap<&'a dyn DataComponentImpl, &'a dyn DataComponentPredicate>,
 }
 
-impl DataComponentMatcher<'_> {
-    pub fn test(&self, item: &ItemStack) -> bool {
+impl Predicate<ItemStack> for DataComponentMatcher<'_> {
+    fn test(&self, item: &ItemStack) -> bool {
         if self.exact.test(item) {
             for &predicate in self.partial.values() {
                 if !predicate.matches(item) {
@@ -44,14 +44,14 @@ impl DataComponentMatcher<'_> {
     }
 }
 
-struct ItemPredicate<'a> {
+pub struct ItemPredicate<'a> {
     items: Option<Vec<&'static Item>>,
     count: IntBounds,
     components: DataComponentMatcher<'a>,
 }
 
-impl ItemPredicate<'_> {
-    pub fn test(&self, item: &ItemStack) -> bool {
+impl Predicate<ItemStack> for ItemPredicate<'_> {
+    fn test(&self, item: &ItemStack) -> bool {
         self.items
             .as_ref()
             .is_none_or(|items| items.contains(&item.item))

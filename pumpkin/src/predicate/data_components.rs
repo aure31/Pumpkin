@@ -1,5 +1,10 @@
-use crate::predicate::custom_predicate::{EnchantmentPredicate, FireworkPredicate, NbtPredicate};
-use crate::predicate::{CollectionPredicate, DataComponentPredicate, SingleComponentItemPredicate};
+use crate::predicate::custom_predicate::{
+    EnchantmentPredicate, FireworkPredicate, ModifierPredicate, NbtPredicate,
+};
+use crate::predicate::item_predicate::ItemPredicate;
+use crate::predicate::{
+    CollectionPredicate, DataComponentPredicate, Predicate, SingleComponentItemPredicate,
+};
 use pumpkin_data::data_component_impl::{
     AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, DamageImpl, DataComponentImpl,
     EnchantmentsImpl, FireworkExplosionImpl, FireworksImpl, JukeboxPlayableImpl, Modifier,
@@ -10,6 +15,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::jukebox_song::JukeboxSong;
 use pumpkin_data::potion::Potion;
 use pumpkin_util::math::bounds::IntBounds;
+use pumpkin_util::text::TextComponent;
 
 pub struct AnyValue<T: DataComponentImpl + 'static>(T);
 impl<T: DataComponentImpl + 'static> DataComponentPredicate for AnyValue<T> {
@@ -19,7 +25,7 @@ impl<T: DataComponentImpl + 'static> DataComponentPredicate for AnyValue<T> {
 }
 
 pub struct AttributeModifiersPredicate {
-    modifiers: Option<CollectionPredicate<Modifier>>,
+    modifiers: Option<CollectionPredicate<Modifier, ModifierPredicate>>,
 }
 impl SingleComponentItemPredicate for AttributeModifiersPredicate {
     type Component = AttributeModifiersImpl;
@@ -30,11 +36,11 @@ impl SingleComponentItemPredicate for AttributeModifiersPredicate {
     }
 }
 
-pub struct BundlePredicate {
-    items: Option<CollectionPredicate<ItemStack>>,
+pub struct BundlePredicate<'a> {
+    items: Option<CollectionPredicate<ItemStack, ItemPredicate<'a>>>,
 }
 
-impl SingleComponentItemPredicate for BundlePredicate {
+impl SingleComponentItemPredicate for BundlePredicate<'_> {
     type Component = BundleContentsImpl;
     fn matches_type(&self, content: &BundleContentsImpl) -> bool {
         self.items
@@ -43,16 +49,16 @@ impl SingleComponentItemPredicate for BundlePredicate {
     }
 }
 
-pub struct ContainerPredicate {
-    items: Option<CollectionPredicate<(u8, ItemStack)>>,
+pub struct ContainerPredicate<'a> {
+    items: Option<CollectionPredicate<ItemStack, ItemPredicate<'a>>>,
 }
 
-impl SingleComponentItemPredicate for ContainerPredicate {
+impl SingleComponentItemPredicate for ContainerPredicate<'_> {
     type Component = ContainerImpl;
     fn matches_type(&self, content: &ContainerImpl) -> bool {
         self.items
             .as_ref()
-            .is_none_or(|items| items.test(content.items.iter()))
+            .is_none_or(|items| items.test(content.items.iter().map(|(_, item)| item)))
     }
 }
 
@@ -99,7 +105,7 @@ impl SingleComponentItemPredicate for FireworkExplosionPredicate {
 }
 
 struct FireworksPredicate {
-    explosions: Option<CollectionPredicate<FireworkExplosionImpl>>,
+    explosions: Option<CollectionPredicate<FireworkExplosionImpl, FireworkPredicate>>,
     flight_duration: IntBounds,
 }
 
@@ -149,7 +155,7 @@ struct TrimPredicate {
 
 impl SingleComponentItemPredicate for TrimPredicate {
     type Component = TrimImpl;
-    fn matches_type(&self, value: &Self::Component) -> bool {
+    fn matches_type(&self, _value: &Self::Component) -> bool {
         false // TODO
     }
 }
@@ -165,8 +171,14 @@ impl SingleComponentItemPredicate for VillagerTypePredicate {
     }
 }
 
+struct StringPagePredicate(String);
+impl Predicate<String> for StringPagePredicate {
+    fn test(&self, value: &String) -> bool {
+        value == &self.0
+    }
+}
 struct WritableBookPredicate {
-    pages: Option<CollectionPredicate<String>>,
+    pages: Option<CollectionPredicate<String, StringPagePredicate>>,
 }
 
 impl SingleComponentItemPredicate for WritableBookPredicate {
@@ -178,9 +190,14 @@ impl SingleComponentItemPredicate for WritableBookPredicate {
             .is_none_or(|pages| pages.test(value.pages.iter()))
     }
 }
-
+struct ComponentPagePredicate(TextComponent);
+impl Predicate<TextComponent> for ComponentPagePredicate {
+    fn test(&self, component: &TextComponent) -> bool {
+        component == &self.0
+    }
+}
 struct WrittenBookPredicate {
-    pages: Option<CollectionPredicate<String>>,
+    pages: Option<CollectionPredicate<TextComponent, ComponentPagePredicate>>,
     author: Option<String>,
     title: Option<String>,
     generation: IntBounds,
