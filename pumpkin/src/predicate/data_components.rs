@@ -7,7 +7,7 @@ use crate::predicate::{
 };
 use pumpkin_data::data_component_impl::{
     AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, DamageImpl, DataComponentImpl,
-    EnchantmentsImpl, FireworkExplosionImpl, FireworksImpl, JukeboxPlayableImpl, Modifier,
+    EnchantmentsImpl, FireworkExplosionImpl, FireworksImpl, JukeboxPlayableImpl,
     PotionContentsImpl, TrimImpl, VillagerVariantImpl, WritableBookContentImpl,
     WrittenBookContentImpl,
 };

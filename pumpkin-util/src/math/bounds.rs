@@ -1,3 +1,6 @@
+use std::ops::{Bound, RangeBounds};
+use sha2::digest::typenum::Double;
+
 /// Represents a single range bound of some type `T`, whose bounds may be optional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bounds<T: Clone + PartialOrd> {
@@ -19,6 +22,22 @@ impl<T: Clone + PartialOrd> Bounds<T> {
             min > max
         } else {
             false
+        }
+    }
+}
+
+impl<T: Clone + PartialOrd> RangeBounds<T> for Bounds<T> {
+    fn start_bound(&self) -> Bound<&T> {
+        match &self.min {
+            Some(min) => Bound::Included(min),
+            None => Bound::Unbounded,
+        }
+    }
+
+    fn end_bound(&self) -> Bound<&T> {
+        match &self.max {
+            Some(max) => Bound::Included(max),
+            None => Bound::Unbounded,
         }
     }
 }
@@ -96,6 +115,24 @@ impl IntBounds {
     impl_square_cached_bounds!(IntBounds, i32, i64);
 }
 
+#[inline]
+fn bound_int_to_option(bound: Bound<&i32>, start: bool) -> Option<i32> {
+    match bound {
+        Bound::Included(n) => Some(*n),
+        Bound::Excluded(n) => Some(*n + (start as i32) * 2 - 1),
+        Bound::Unbounded => None,
+    }
+}
+
+impl<T: RangeBounds<i32>> From<T> for IntBounds {
+    fn from(value: T) -> Self {
+        Self::from_bounds(Bounds::<i32>::new(
+            bound_int_to_option(value.start_bound(), true),
+            bound_int_to_option(value.end_bound(), false),
+        ))
+    }
+}
+
 /// Represents a range of `f64`s.
 /// This range stores both the bounds of the range and the squares of the bounds.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -118,6 +155,24 @@ impl DoubleBounds {
     }
 
     impl_square_cached_bounds!(DoubleBounds, f64, f64);
+}
+
+#[inline]
+fn bound_double_to_option(bound: Bound<&f64>, start: bool) -> Option<f64> {
+    match bound {
+        Bound::Included(n) => Some(*n),
+        Bound::Excluded(n) => Some(*n + (start as i8 * 2 - 1) as f64),
+        Bound::Unbounded => None,
+    }
+}
+
+impl<T: RangeBounds<f64>> From<T> for DoubleBounds {
+    fn from(value: T) -> Self {
+        Self::from_bounds(Bounds::<f64>::new(
+            bound_double_to_option(value.start_bound(), true),
+            bound_double_to_option(value.end_bound(), false),
+        ))
+    }
 }
 
 /// Represents a range of degrees, stored as `f32`s.
@@ -144,5 +199,23 @@ impl FloatDegreeBounds {
     #[must_use]
     pub const fn max(&self) -> Option<f32> {
         self.bounds.max
+    }
+}
+
+#[inline]
+fn bound_float_to_option(bound: Bound<&f32>, start: bool) -> Option<f32> {
+    match bound {
+        Bound::Included(n) => Some(*n),
+        Bound::Excluded(n) => Some(*n + (start as i8 * 2 - 1) as f32),
+        Bound::Unbounded => None,
+    }
+}
+
+impl<T: RangeBounds<f32>> From<T> for FloatDegreeBounds {
+    fn from(value: T) -> Self {
+        Self::from_bounds(Bounds::<f32>::new(
+            bound_float_to_option(value.start_bound(), true),
+            bound_float_to_option(value.end_bound(), false),
+        ))
     }
 }
