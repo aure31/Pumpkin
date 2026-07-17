@@ -237,11 +237,26 @@ impl LivingEntity {
             b &= !index;
         }
         self.livings_flags.store(b, Ordering::Relaxed);
-        self.entity.send_meta_data(&[Metadata::new(
-            TrackedData::LIVING_ENTITY_FLAGS,
-            MetaDataType::BYTE,
-            b,
-        )]);
+
+        let bedrock_meta = (flag == Self::USING_ITEM_FLAG).then(|| {
+            let mut meta = pumpkin_protocol::bedrock::client::set_actor_data::EntityMetadata::new();
+            meta.set_flag(
+                pumpkin_protocol::bedrock::client::set_actor_data::entity_data_key::FLAGS,
+                pumpkin_protocol::bedrock::client::set_actor_data::entity_data_flag::USING_ITEM
+                    as u8,
+                value,
+            );
+            meta
+        });
+
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                TrackedData::LIVING_ENTITY_FLAGS,
+                MetaDataType::BYTE,
+                b,
+            )],
+            bedrock_meta.as_ref(),
+        );
     }
 
     pub async fn clear_active_hand(&self) {
@@ -274,11 +289,14 @@ impl LivingEntity {
         let clamped = health.max(0.0).min(max_health);
         self.health.store(clamped);
         // tell everyone entities health changed
-        self.entity.send_meta_data(&[Metadata::new(
-            TrackedData::HEALTH_ID,
-            MetaDataType::FLOAT,
-            clamped,
-        )]);
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                TrackedData::HEALTH_ID,
+                MetaDataType::FLOAT,
+                clamped,
+            )],
+            None,
+        );
     }
 
     /// Returns the current maximum health for this entity
@@ -328,8 +346,10 @@ impl LivingEntity {
 
         // Send absorption metadata for players (visual yellow hearts)
         if let Some(tracked_id) = self.player_absorption_id() {
-            self.entity
-                .send_meta_data(&[Metadata::new(tracked_id, MetaDataType::FLOAT, new_abs)]);
+            self.entity.send_meta_data(
+                &[Metadata::new(tracked_id, MetaDataType::FLOAT, new_abs)],
+                None,
+            );
         }
     }
 
@@ -1351,6 +1371,12 @@ impl LivingEntity {
                 tool,
                 is_raining: Some(is_raining),
                 is_thundering: Some(is_thundering),
+                is_on_fire: Some(
+                    self.entity
+                        .fire_ticks
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                        > 0,
+                ),
                 ..Default::default()
             };
 
@@ -1459,6 +1485,38 @@ impl LivingEntity {
                         1,
                     )
                     .await;
+
+                let resource_name = self.entity.entity_type.resource_name;
+                let criterion_key = format!("minecraft:{resource_name}");
+                killer_player
+                    .trigger_advancement(
+                        crate::entity::player::advancement::trigger::AdvancementTrigger::PlayerKilledEntity {
+                            entity_type_resource: criterion_key,
+                        }
+                    )
+                    .await;
+
+                if resource_name == "skeleton" {
+                    let distance_sq = killer_player
+                        .position()
+                        .squared_distance_to_vec(&self.entity.pos.load());
+                    if distance_sq >= 2500.0 {
+                        killer_player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::SniperDuel).await;
+                    }
+                }
+
+                if resource_name == "phantom" {
+                    killer_player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::TwoBirdsOneArrow).await;
+                }
+
+                let held_item = killer_player.inventory().held_item();
+                let is_crossbow = {
+                    let lock = held_item.lock().await;
+                    lock.item.registry_key == "crossbow"
+                };
+                if is_crossbow {
+                    killer_player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::Arbalistic).await;
+                }
             }
             killer_player
                 .increment_stat(
@@ -1785,11 +1843,14 @@ impl LivingEntity {
         // Clear any absorption
         self.absorption.store(0.0);
         // Send health metadata
-        self.entity.send_meta_data(&[Metadata::new(
-            TrackedData::HEALTH_ID,
-            MetaDataType::FLOAT,
-            max_health,
-        )]);
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                TrackedData::HEALTH_ID,
+                MetaDataType::FLOAT,
+                max_health,
+            )],
+            None,
+        );
 
         self.reset_effects_and_attributes().await;
 
@@ -2183,6 +2244,8 @@ impl EntityBase for LivingEntity {
                                 (effective_amount * 10.0) as i32,
                             )
                             .await;
+
+                        player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::DeflectedDamage).await;
                     }
 
                     if let Some(attacker_player) = cause.and_then(|c| c.get_player()) {
@@ -2600,6 +2663,12 @@ impl EntityBase for LivingEntity {
                     }
 
                     if let Some(player) = caller.get_player() {
+                        player
+                            .trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::ConsumeItem {
+                                item_id: format!("minecraft:{}", item.item.registry_key),
+                            })
+                            .await;
+
                         // Prefer modifying the exact stack that matches the consumed item:
                         // 1) selected hotbar (held_item)
                         // 2) off-hand
