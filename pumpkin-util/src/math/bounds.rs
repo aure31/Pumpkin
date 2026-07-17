@@ -27,17 +27,11 @@ impl<T: Clone + PartialOrd> Bounds<T> {
 
 impl<T: Clone + PartialOrd> RangeBounds<T> for Bounds<T> {
     fn start_bound(&self) -> Bound<&T> {
-        match &self.min {
-            Some(min) => Bound::Included(min),
-            None => Bound::Unbounded,
-        }
+        self.min.as_ref().map_or(Bound::Unbounded, Bound::Included)
     }
 
     fn end_bound(&self) -> Bound<&T> {
-        match &self.max {
-            Some(max) => Bound::Included(max),
-            None => Bound::Unbounded,
-        }
+        self.max.as_ref().map_or(Bound::Unbounded, Bound::Included)
     }
 }
 
@@ -115,7 +109,7 @@ impl IntBounds {
 }
 
 #[inline]
-fn bound_int_to_option(bound: Bound<&i32>, start: bool) -> Option<i32> {
+const fn bound_int_to_option(bound: Bound<&i32>, start: bool) -> Option<i32> {
     match bound {
         Bound::Included(n) => Some(*n),
         Bound::Excluded(n) => Some(*n + (start as i32) * 2 - 1),

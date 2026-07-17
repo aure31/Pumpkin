@@ -14,8 +14,8 @@ pub mod data_components;
 pub mod item_predicate;
 
 /// Checks whether an [`ItemStack`] satisfies a component-based predicate.
-/// > Would be latter replace [`ItemStack`] to a more generic types
-/// like the `ComponentGetter` used in the Minecraft source code
+/// > Would be latter replace [`ItemStack`] to a more generic type
+/// > like the `ComponentGetter` used in the Minecraft source code
 pub trait DataComponentPredicate {
     fn matches(&self, components: &ItemStack) -> bool;
 }
