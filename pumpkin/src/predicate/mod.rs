@@ -1,4 +1,8 @@
 #![allow(unused)]
+//! Small predicate helpers used to describe item and collection checks.
+//!
+//! The module keeps the building blocks generic so the same logic can be
+//! reused across different predicate types without a lot of boilerplate.
 use pumpkin_data::data_component_impl::DataComponentImpl;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_util::math::bounds::IntBounds;
@@ -9,6 +13,9 @@ pub mod custom_predicate;
 pub mod data_components;
 pub mod item_predicate;
 
+/// Checks whether an [`ItemStack`] satisfies a component-based predicate.
+/// > Would be latter replace [`ItemStack`] to a more generic types
+/// like the `ComponentGetter` used in the Minecraft source code
 pub trait DataComponentPredicate {
     fn matches(&self, components: &ItemStack) -> bool;
 }
@@ -25,12 +32,14 @@ impl<G: SingleComponentItemPredicate> DataComponentPredicate for G {
     }
 }
 
+/// Generic predicate interface used by the collection helpers below.
 pub trait Predicate {
     type Item: 'static + ?Sized;
     #[must_use]
     fn test(&self, item: &Self::Item) -> bool;
 }
 
+/// Wraps a plain closure or function so it can be used where a [`Predicate`] is expected.
 pub struct FnPredicate<F: Fn(&T) -> bool, T: ?Sized> {
     f: F,
     _marker: PhantomData<T>,
@@ -43,6 +52,7 @@ impl<F: Fn(&T) -> bool, T: 'static + ?Sized> Predicate for FnPredicate<F, T> {
     }
 }
 
+/// Builds a [`FnPredicate`] from a closure.
 pub const fn function<F: Fn(&T) -> bool, T>(f: F) -> FnPredicate<F, T> {
     FnPredicate {
         f,
@@ -56,6 +66,7 @@ struct CollectionCountsEntry<G: Predicate> {
 }
 
 impl<G: Predicate> CollectionCountsEntry<G> {
+    /// Tests how many values match the inner predicate.
     pub fn test<'a>(&self, values: impl Iterator<Item = &'a G::Item> + Sized) -> bool {
         self.counts.matches(
             values
@@ -73,6 +84,7 @@ enum CollectionContentsPredicate<G: Predicate> {
 }
 
 impl<P: Predicate> CollectionContentsPredicate<P> {
+    /// Packs an iterator of predicates into the smallest useful variant.
     pub fn of<T: IntoIterator<Item = P>>(predicates: T) -> Self {
         let mut iter = predicates.into_iter();
         match (iter.next(), iter.next()) {
@@ -88,6 +100,7 @@ impl<P: Predicate> CollectionContentsPredicate<P> {
 }
 
 impl<G: Predicate> CollectionContentsPredicate<G> {
+    /// Checks that each predicate finds at least one matching value.
     pub fn test<'a>(
         &self,
         values: impl IntoIterator<Item = &'a G::Item, IntoIter: Iterator<Item = &'a G::Item> + Clone>,
@@ -125,6 +138,7 @@ enum CollectionCountsPredicate<P: Predicate> {
 }
 
 impl<P: Predicate> CollectionCountsPredicate<P> {
+    /// Packs count constraints into the smallest useful variant.
     pub fn of<T: IntoIterator<Item = CollectionCountsEntry<P>>>(predicates: T) -> Self {
         let mut iter = predicates.into_iter();
         match (iter.next(), iter.next()) {
@@ -155,6 +169,7 @@ macro_rules! collection_counts_predicate {
 }
 
 impl<G: Predicate> CollectionCountsPredicate<G> {
+    /// Checks that each count constraint is satisfied by the same values.
     pub fn test<'a>(&self, values: impl IntoIterator<Item = &'a G::Item, IntoIter: Clone>) -> bool {
         let iterator = &values.into_iter();
         match self {
@@ -172,6 +187,7 @@ struct CollectionPredicate<G: Predicate> {
 }
 
 impl<G: Predicate> CollectionPredicate<G> {
+    /// Creates a collection predicate from optional content, count, and size checks.
     pub const fn new(
         contains: Option<CollectionContentsPredicate<G>>,
         counts: Option<CollectionCountsPredicate<G>>,
@@ -186,6 +202,7 @@ impl<G: Predicate> CollectionPredicate<G> {
 }
 
 impl<G: Predicate> CollectionPredicate<G> {
+    /// Runs every enabled check against the provided values.
     pub fn test<'a>(
         &self,
         values: impl IntoIterator<Item = &'a G::Item, IntoIter: Clone> + Clone,
@@ -274,5 +291,39 @@ mod tests {
             CollectionPredicate::new(None, None, Some((2..).into()));
         assert!(size.test([&0, &-1, &1]));
         assert!(!size.test([&0]));
+        let zero_combine = CollectionPredicate::<Fni32>::new(
+            Some(collection_contents_predicate!()),
+            Some(collection_counts_predicate!()),
+            Some((2..).into()),
+        );
+        assert!(zero_combine.test([&0, &-1, &1]));
+        assert!(!zero_combine.test([&0]));
+        let single_combine = CollectionPredicate::<Fni32>::new(
+            Some(collection_contents_predicate!(function(
+                |val: &i32| val > &0
+            ))),
+            Some(collection_counts_predicate!(function(|val:&i32| val < &0)=>1..=2)),
+            Some((3..).into()),
+        );
+        assert!(single_combine.test([&0, &-1, &1]));
+        assert!(!single_combine.test([&-1, &-2, &-3, &4]));
+        assert!(!single_combine.test([&-1, &1]));
+        assert!(!single_combine.test([&0]));
+        let multiple_combine = CollectionPredicate::<Fni32>::new(
+            Some(collection_contents_predicate!(
+                function(|&val: &i32| val < 0),
+                function(|&val: &i32| val == 0)
+            )),
+            Some(collection_counts_predicate!(Fni32;
+                function(|&val:&i32| val <= 2 && val > 0)=>1..=2,
+                function(|&val:&i32| val == 4)=>1..2
+            )),
+            Some((..=5).into()),
+        );
+        assert!(multiple_combine.test([&0, &-1, &1, &4]));
+        assert!(!multiple_combine.test([&0, &-1, &1, &4, &4]));
+        assert!(!multiple_combine.test([&0, &1]));
+        assert!(multiple_combine.test([&0, &-1, &-2, &2, &4]));
+        assert!(!multiple_combine.test([&0, &-1, &1, &1, &4, &0]));
     }
 }

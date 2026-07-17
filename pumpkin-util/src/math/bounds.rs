@@ -1,5 +1,4 @@
 use std::ops::{Bound, RangeBounds};
-use sha2::digest::typenum::Double;
 
 /// Represents a single range bound of some type `T`, whose bounds may be optional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
