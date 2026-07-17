@@ -118,11 +118,5 @@ pub fn build() -> TokenStream {
                 }
             }
         }
-
-        impl PartialEq for Potion {
-            fn eq(&self, other: &Self) -> bool {
-                self.id == other.id
-            }
-        }
     }
 }
