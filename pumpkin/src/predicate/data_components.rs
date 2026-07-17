@@ -260,7 +260,7 @@ mod tests {
     fn any_value_matches_component_presence() {
         let item = ItemStack::new(1, &pumpkin_data::item::Item::STONE);
         let predicate = AnyValue(DamageImpl { damage: 0 });
-        
+
         // Stone doesn't have damage by default
         assert!(!predicate.matches(&item));
     }
@@ -289,9 +289,8 @@ mod tests {
         use pumpkin_util::text::TextComponent;
         let component = TextComponent::text("Test page");
         let page = ComponentPagePredicate(component.clone());
-        
+
         assert!(page.test(&component));
         assert!(!page.test(&TextComponent::text("Different")));
     }
 }
-
