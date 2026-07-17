@@ -1,3 +1,8 @@
+//! Predicates for concrete item, enchantment, firework, and NBT checks.
+//!
+//! The helpers stay fairly small so they can be combined from higher-level
+//! predicate builders without duplicating the matching logic.
+
 use crate::entity::NBTStorage;
 use crate::predicate::Predicate;
 use pumpkin_data::attributes::Attributes;
@@ -10,6 +15,7 @@ use pumpkin_data::{AttributeModifierSlot, Enchantment};
 use pumpkin_nbt::NbtCompound;
 use pumpkin_util::math::bounds::{DoubleBounds, IntBounds};
 
+/// Matches a single attribute modifier against a few optional filters.
 pub struct ModifierPredicate {
     attribute: Option<Vec<&'static Attributes>>,
     id: Option<&'static str>,
@@ -34,6 +40,7 @@ impl Predicate for ModifierPredicate {
     }
 }
 
+/// Matches an enchantment list with either an id filter, a level filter, or both.
 pub struct EnchantmentPredicate {
     enchantments: Option<Vec<&'static Enchantment>>,
     level: IntBounds,
@@ -71,6 +78,7 @@ impl EnchantmentPredicate {
     }
 }
 
+/// Matches a firework explosion by shape and flags.
 pub struct FireworkPredicate {
     shape: Option<FireworkExplosionShape>,
     twinkle: Option<bool>,
@@ -94,9 +102,11 @@ impl Predicate for FireworkPredicate {
     }
 }
 
+/// Compares NBT data against an item or an arbitrary storage backend.
 pub struct NbtPredicate(NbtCompound);
 
 impl NbtPredicate {
+    /// Checks the serialized NBT of a storage target.
     pub async fn matches_storage(&self, storage: &dyn NBTStorage) -> bool {
         let mut output = NbtCompound::new();
         storage.write_nbt(&mut output).await;
@@ -104,8 +114,128 @@ impl NbtPredicate {
     }
 
     #[must_use]
+    /// Checks the custom data component stored on an item.
     pub fn matches_item(&self, item: &ItemStack) -> bool {
         let data: Option<&CustomDataImpl> = item.get_data_component();
         self.0.is_empty() || data.is_some_and(|data| data.data == self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::NbtFuture;
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::CustomDataImpl;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_util::math::bounds::{DoubleBounds, IntBounds};
+    use std::borrow::Cow;
+
+    #[test]
+    fn modifier_predicate_filters_values() {
+        let predicate = ModifierPredicate {
+            attribute: Some(vec![&Attributes::ARMOR]),
+            id: Some("armor_bonus"),
+            amount: DoubleBounds::from(1.0..3.0),
+            operation: Some(Operation::AddValue),
+            slot: Some(AttributeModifierSlot::Chest),
+        };
+
+        let matching = Modifier {
+            r#type: &Attributes::ARMOR,
+            id: "armor_bonus",
+            amount: 2.0,
+            operation: Operation::AddValue,
+            slot: AttributeModifierSlot::Chest,
+        };
+        let wrong_amount = Modifier {
+            amount: 4.0,
+            ..matching.clone()
+        };
+
+        assert!(predicate.test(&matching));
+        assert!(!predicate.test(&wrong_amount));
+    }
+
+    static ENCHANT: &[(&Enchantment, i32); 1] = &[(&Enchantment::SHARPNESS, 4)];
+
+    #[test]
+    fn enchantment_predicate_matches_expected_level() {
+        let predicate = EnchantmentPredicate {
+            enchantments: Some(vec![&Enchantment::SHARPNESS]),
+            level: (3..=5).into(),
+        };
+
+        let enchantments = EnchantmentsImpl {
+            enchantment: Cow::Owned(vec![(&Enchantment::SHARPNESS, 4)]),
+        };
+
+        assert!(predicate.contained_in(&enchantments));
+        assert!(!predicate.matches_enchantment(&enchantments, &Enchantment::MENDING));
+    }
+
+    #[test]
+    fn firework_predicate_checks_shape_and_flags() {
+        let predicate = FireworkPredicate {
+            shape: Some(FireworkExplosionShape::Star),
+            twinkle: Some(true),
+            trail: Some(false),
+        };
+        let firework = FireworkExplosionImpl::new(
+            FireworkExplosionShape::Star,
+            vec![0xff00ff],
+            vec![],
+            false,
+            true,
+        );
+
+        assert!(predicate.test(&firework));
+    }
+
+    #[test]
+    fn nbt_predicate_matches_item_custom_data() {
+        let mut data = NbtCompound::new();
+        data.put_string("owner", "pumpkin".to_owned());
+
+        let predicate = NbtPredicate(data.clone());
+        let item = ItemStack::new_with_component(
+            1,
+            &Item::STONE,
+            vec![(
+                DataComponent::CustomData,
+                Some(Box::new(CustomDataImpl::new(data))),
+            )],
+        );
+
+        assert!(predicate.matches_item(&item));
+    }
+
+    struct TestStorage {
+        data: NbtCompound,
+    }
+
+    impl NBTStorage for TestStorage {
+        fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+            Box::pin(async move {
+                *nbt = self.data.clone();
+            })
+        }
+
+        fn read_nbt_non_mut<'a>(&'a self, _nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    #[tokio::test]
+    async fn nbt_predicate_matches_storage() {
+        let mut data = NbtCompound::new();
+        data.put_int("age", 12);
+
+        let predicate = NbtPredicate(data.clone());
+        let storage = TestStorage { data };
+
+        assert!(predicate.matches_storage(&storage).await);
     }
 }
