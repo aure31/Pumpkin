@@ -3,33 +3,25 @@
 //!
 //! The module keeps the building blocks generic so the same logic can be
 //! reused across different predicate types without a lot of boilerplate.
-use crate::data_component_impl::DataComponentImpl;
+use crate::data_component::DataComponent;
+use crate::data_component_impl::{
+    AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, DataComponentImpl,
+};
 use crate::item_stack::ItemStack;
+use crate::jukebox_song::JukeboxSong;
+use crate::potion::Potion;
+use crate::predicate::custom_predicate::{
+    EnchantmentPredicate, FireworkPredicate, ModifierPredicate, NbtPredicate,
+};
+use crate::predicate::item_predicate::ItemPredicate;
 use pumpkin_util::math::bounds::IntBounds;
+use pumpkin_util::text::TextComponent;
 use std::marker::PhantomData;
+use std::path::Component;
 
 pub mod custom_predicate;
 pub mod data_components;
 pub mod item_predicate;
-
-/// Checks whether an [`ItemStack`] satisfies a component-based predicate.
-/// > Would be latter replace [`ItemStack`] to a more generic type
-/// > like the `ComponentGetter` used in the Minecraft source code
-pub trait DataComponentPredicate {
-    fn matches(&self, components: &ItemStack) -> bool;
-}
-
-trait SingleComponentItemPredicate {
-    type Component: DataComponentImpl + 'static;
-    fn matches_type(&self, value: &Self::Component) -> bool;
-}
-
-impl<G: SingleComponentItemPredicate> DataComponentPredicate for G {
-    fn matches(&self, components: &ItemStack) -> bool {
-        let value: Option<&G::Component> = components.get_data_component();
-        value.is_some() && self.matches_type(value.unwrap())
-    }
-}
 
 /// Generic predicate interface used by the collection helpers below.
 pub trait Predicate {
@@ -52,14 +44,30 @@ impl<F: Fn(&T) -> bool, T: 'static + ?Sized> Predicate for FnPredicate<F, T> {
 }
 
 /// Builds a [`FnPredicate`] from a closure.
-pub const fn function<F: Fn(&T) -> bool, T>(f: F) -> FnPredicate<F, T> {
+pub const fn predicate<F: Fn(&T) -> bool, T>(f: F) -> FnPredicate<F, T> {
     FnPredicate {
         f,
         _marker: PhantomData,
     }
 }
 
-struct CollectionCountsEntry<G: Predicate> {
+pub struct FnStoredPredicate<T> {
+    f: fn(&T, &T) -> bool,
+    value: T,
+}
+
+impl<T: 'static> Predicate for FnStoredPredicate<T> {
+    type Item = T;
+    fn test(&self, item: &Self::Item) -> bool {
+        (self.f)(&self.value, item)
+    }
+}
+
+pub const fn stored_predicate<T>(f: fn(&T, &T) -> bool, value: T) -> FnStoredPredicate<T> {
+    FnStoredPredicate { f, value }
+}
+
+pub struct CollectionCountsEntry<G: Predicate> {
     predicate: G,
     counts: IntBounds,
 }
@@ -76,7 +84,7 @@ impl<G: Predicate> CollectionCountsEntry<G> {
     }
 }
 
-enum CollectionContentsPredicate<G: Predicate> {
+pub enum CollectionContentsPredicate<G: Predicate> {
     Multiple(Vec<G>),
     Single(G),
     Zero,
@@ -130,7 +138,7 @@ macro_rules! collection_contents_predicate {
     };
 }
 
-enum CollectionCountsPredicate<P: Predicate> {
+pub enum CollectionCountsPredicate<P: Predicate> {
     Multiple(Vec<CollectionCountsEntry<P>>),
     Single(CollectionCountsEntry<P>),
     Zero,
@@ -179,7 +187,7 @@ impl<G: Predicate> CollectionCountsPredicate<G> {
     }
 }
 
-struct CollectionPredicate<G: Predicate> {
+pub struct CollectionPredicate<G: Predicate> {
     contains: Option<CollectionContentsPredicate<G>>,
     counts: Option<CollectionCountsPredicate<G>>,
     size: Option<IntBounds>,
@@ -224,7 +232,7 @@ impl<G: Predicate> CollectionPredicate<G> {
 mod tests {
     use crate::predicate::{
         CollectionContentsPredicate, CollectionCountsEntry, CollectionCountsPredicate,
-        CollectionPredicate, FnPredicate, function,
+        CollectionPredicate, FnPredicate, Predicate, predicate, stored_predicate,
     };
     use pumpkin_util::math::bounds::IntBounds;
     type Fni32 = FnPredicate<fn(&i32) -> bool, i32>;
@@ -233,13 +241,13 @@ mod tests {
     fn collection_content_predicate() {
         let zero: CollectionContentsPredicate<Fni32> = collection_contents_predicate!();
         assert!(zero.test([&0]));
-        let single = collection_contents_predicate!(function(|val| val > &0));
+        let single = collection_contents_predicate!(predicate(|val| val > &0));
         assert!(single.test([&0, &-1, &1]));
         assert!(!single.test([&0]));
         let multiple = collection_contents_predicate!(
             Fni32;
-            function(|val| val < &0),
-            function(|val| val > &0)
+            predicate(|val| val < &0),
+            predicate(|val| val > &0)
         );
         assert!(multiple.test([&-1, &1]));
         assert!(multiple.test([&-2, &0, &1]));
@@ -250,15 +258,15 @@ mod tests {
     fn collection_counts_predicate() {
         let zero: CollectionCountsPredicate<Fni32> = collection_counts_predicate!();
         assert!(zero.test([&0]));
-        let single = collection_counts_predicate!(function(|val: &i32| val > &0)=>1..=2);
+        let single = collection_counts_predicate!(predicate(|val: &i32| val > &0)=>1..=2);
         assert!(!single.test([&0, &1, &2, &3]));
         assert!(single.test([&0, &1, &2]));
         assert!(single.test([&0, &1]));
         assert!(!single.test([&0]));
         let multiple = collection_counts_predicate!(
             Fni32;
-            function(|val: &i32| val > &0)=>1..=2,
-            function(|val: &i32| val < &0)=>2..=3,
+            predicate(|val: &i32| val > &0)=>1..=2,
+            predicate(|val: &i32| val < &0)=>2..=3,
         );
         assert!(!multiple.test([&-1, &0, &1, &2, &3]));
         assert!(multiple.test([&-2, &-1, &0, &1, &2]));
@@ -271,7 +279,7 @@ mod tests {
         let empty: CollectionPredicate<Fni32> = CollectionPredicate::new(None, None, None);
         assert!(empty.test([&0]));
         let contains = CollectionPredicate::new(
-            Some(collection_contents_predicate!(function(
+            Some(collection_contents_predicate!(predicate(
                 |val: &i32| val > &0
             ))),
             None,
@@ -281,7 +289,7 @@ mod tests {
         assert!(!contains.test([&0]));
         let counts = CollectionPredicate::new(
             None,
-            Some(collection_counts_predicate!(function(|val: &i32| val > &0)=>1..=2)),
+            Some(collection_counts_predicate!(predicate(|val: &i32| val > &0)=>1..=2)),
             None,
         );
         assert!(counts.test([&0, &-1, &1]));
@@ -298,10 +306,10 @@ mod tests {
         assert!(zero_combine.test([&0, &-1, &1]));
         assert!(!zero_combine.test([&0]));
         let single_combine = CollectionPredicate::<Fni32>::new(
-            Some(collection_contents_predicate!(function(
+            Some(collection_contents_predicate!(predicate(
                 |val: &i32| val > &0
             ))),
-            Some(collection_counts_predicate!(function(|val:&i32| val < &0)=>1..=2)),
+            Some(collection_counts_predicate!(predicate(|val:&i32| val < &0)=>1..=2)),
             Some((3..).into()),
         );
         assert!(single_combine.test([&0, &-1, &1]));
@@ -310,12 +318,12 @@ mod tests {
         assert!(!single_combine.test([&0]));
         let multiple_combine = CollectionPredicate::<Fni32>::new(
             Some(collection_contents_predicate!(
-                function(|&val: &i32| val < 0),
-                function(|&val: &i32| val == 0)
+                predicate(|&val: &i32| val < 0),
+                predicate(|&val: &i32| val == 0)
             )),
             Some(collection_counts_predicate!(Fni32;
-                function(|&val:&i32| val <= 2 && val > 0)=>1..=2,
-                function(|&val:&i32| val == 4)=>1..2
+                predicate(|&val:&i32| val <= 2 && val > 0)=>1..=2,
+                predicate(|&val:&i32| val == 4)=>1..2
             )),
             Some((..=5).into()),
         );
@@ -324,5 +332,22 @@ mod tests {
         assert!(!multiple_combine.test([&0, &1]));
         assert!(multiple_combine.test([&0, &-1, &-2, &2, &4]));
         assert!(!multiple_combine.test([&0, &-1, &1, &1, &4, &0]));
+    }
+
+    #[test]
+    fn string_page_predicate_tests_equality() {
+        let page = stored_predicate(PartialEq::eq, "Hello, world!".to_string());
+        assert!(page.test(&"Hello, world!".to_string()));
+        assert!(!page.test(&"Goodbye!".to_string()));
+    }
+
+    #[test]
+    fn component_page_predicate_tests_text_component_equality() {
+        use pumpkin_util::text::TextComponent;
+        let component = TextComponent::text("Test page");
+        let page = stored_predicate(PartialEq::eq, component.clone());
+
+        assert!(page.test(&component));
+        assert!(!page.test(&TextComponent::text("Different")));
     }
 }

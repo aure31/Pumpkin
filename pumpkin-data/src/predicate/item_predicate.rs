@@ -3,10 +3,12 @@
 //! Combines item identity checks with component matchers to validate
 //! whether an item stack satisfies all predicates.
 #![allow(clippy::disallowed_types)]
+use crate::data_component::DataComponent;
 use crate::data_component_impl::DataComponentImpl;
 use crate::item::Item;
 use crate::item_stack::ItemStack;
-use crate::predicate::{DataComponentPredicate, Predicate};
+use crate::predicate::Predicate;
+use crate::predicate::data_components::DataComponentPredicate;
 use pumpkin_util::math::bounds::IntBounds;
 use std::collections::HashMap;
 
@@ -19,10 +21,7 @@ impl DataComponentExactPredicate {
     fn test(&self, actual_components: &ItemStack) -> bool {
         for expected in &self.expected_components {
             let actual = actual_components.get_data_component_dyn(&expected.get_self_enum());
-            if actual.is_none()
-                || actual.unwrap().get_self_enum() != expected.get_self_enum()
-                || !expected.equal(actual.unwrap())
-            {
+            if actual.is_none() || !expected.equal(actual.unwrap()) {
                 return false;
             }
         }
@@ -31,17 +30,17 @@ impl DataComponentExactPredicate {
 }
 
 /// Combines exact component checks with partial predicates for flexible matching.
-struct DataComponentMatcher<'a> {
+struct DataComponentMatcher {
     exact: DataComponentExactPredicate,
-    partial: HashMap<&'a dyn DataComponentImpl, &'a dyn DataComponentPredicate>,
+    partial: HashMap<DataComponent, DataComponentPredicate>,
 }
 
-impl Predicate for DataComponentMatcher<'_> {
+impl Predicate for DataComponentMatcher {
     type Item = ItemStack;
     fn test(&self, item: &ItemStack) -> bool {
         if self.exact.test(item) {
-            for &predicate in self.partial.values() {
-                if !predicate.matches(item) {
+            for predicate in self.partial.values() {
+                if !predicate.test(item) {
                     return false;
                 }
             }
@@ -53,13 +52,13 @@ impl Predicate for DataComponentMatcher<'_> {
 }
 
 /// Matches an item stack by type, count, and data components.
-pub struct ItemPredicate<'a> {
+pub struct ItemPredicate {
     items: Option<Vec<&'static Item>>,
     count: IntBounds,
-    components: DataComponentMatcher<'a>,
+    components: DataComponentMatcher,
 }
 
-impl Predicate for ItemPredicate<'_> {
+impl Predicate for ItemPredicate {
     type Item = ItemStack;
     fn test(&self, item: &ItemStack) -> bool {
         self.items

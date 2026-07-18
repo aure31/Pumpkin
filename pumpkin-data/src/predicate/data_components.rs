@@ -1,14 +1,5 @@
-//! Predicates wrapping Minecraft data components for item checks.
-//!
-//! Each struct here validates one or more component fields (damage, enchantments,
-//! book content, etc.) using the lower-level predicates from `custom_predicate`.
-
-use crate::data_component_impl::{
-    AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, DamageImpl, DataComponentImpl,
-    EnchantmentsImpl, FireworkExplosionImpl, FireworksImpl, JukeboxPlayableImpl,
-    PotionContentsImpl, TrimImpl, VillagerVariantImpl, WritableBookContentImpl,
-    WrittenBookContentImpl,
-};
+use crate::data_component::DataComponent;
+use crate::data_component_impl::{AttributeModifiersImpl, BundleContentsImpl, ContainerImpl};
 use crate::item_stack::ItemStack;
 use crate::jukebox_song::JukeboxSong;
 use crate::potion::Potion;
@@ -16,239 +7,165 @@ use crate::predicate::custom_predicate::{
     EnchantmentPredicate, FireworkPredicate, ModifierPredicate, NbtPredicate,
 };
 use crate::predicate::item_predicate::ItemPredicate;
-use crate::predicate::{
-    CollectionPredicate, DataComponentPredicate, Predicate, SingleComponentItemPredicate,
-};
+use crate::predicate::{CollectionPredicate, FnStoredPredicate, Predicate};
 use pumpkin_util::math::bounds::IntBounds;
 use pumpkin_util::text::TextComponent;
 
-/// Matches any item that has the given data component, regardless of its value.
-pub struct AnyValue<T: DataComponentImpl + 'static>(T);
-impl<T: DataComponentImpl + 'static> DataComponentPredicate for AnyValue<T> {
-    fn matches(&self, components: &ItemStack) -> bool {
-        components.get_data_component::<T>().is_some()
-    }
+/// Checks whether an [`ItemStack`] satisfies a component-based predicate.
+/// > Would be latter replace [`ItemStack`] to a more generic type
+/// > like the `ComponentGetter` used in the Minecraft source code
+pub enum DataComponentPredicate {
+    AnyValue(DataComponent),
+    AttributeModifiers(Option<CollectionPredicate<ModifierPredicate>>),
+    Bundle(Option<CollectionPredicate<ItemPredicate>>),
+    Container(Option<CollectionPredicate<ItemPredicate>>),
+    Damage {
+        durability: IntBounds,
+        damage: IntBounds,
+    },
+    Enchantments(Vec<EnchantmentPredicate>),
+    FireworkExplosion(FireworkPredicate),
+    Fireworks {
+        explosions: Option<CollectionPredicate<FireworkPredicate>>,
+        flight_duration: IntBounds,
+    },
+    JukeboxPlayable(Option<Vec<&'static JukeboxSong>>),
+    Potions(Vec<&'static Potion>),
+    Trim {
+        material: Option<Vec<&'static str>>,
+        pattern: Option<Vec<&'static str>>,
+    },
+    VillagerType(Vec<&'static str>),
+    WritableBook(Option<CollectionPredicate<FnStoredPredicate<String>>>),
+    WrittenBook {
+        pages: Option<CollectionPredicate<FnStoredPredicate<TextComponent>>>,
+        author: Option<String>,
+        title: Option<String>,
+        generation: IntBounds,
+        resolved: Option<bool>,
+    },
+    CustomData(NbtPredicate),
 }
 
-/// Matches attribute modifiers with optional collection filters on the modifier list.
-pub struct AttributeModifiersPredicate {
-    modifiers: Option<CollectionPredicate<ModifierPredicate>>,
-}
-impl SingleComponentItemPredicate for AttributeModifiersPredicate {
-    type Component = AttributeModifiersImpl;
-    fn matches_type(&self, attributes: &AttributeModifiersImpl) -> bool {
-        self.modifiers
-            .as_ref()
-            .is_none_or(|modifiers| modifiers.test(attributes.attribute_modifiers.iter()))
-    }
-}
+impl Predicate for DataComponentPredicate {
+    type Item = ItemStack;
 
-/// Matches bundle contents against optional item filters.
-pub struct BundlePredicate<'a> {
-    items: Option<CollectionPredicate<ItemPredicate<'a>>>,
-}
-
-impl SingleComponentItemPredicate for BundlePredicate<'_> {
-    type Component = BundleContentsImpl;
-    fn matches_type(&self, content: &BundleContentsImpl) -> bool {
-        self.items
-            .as_ref()
-            .is_none_or(|items| items.test(content.items.iter()))
-    }
-}
-
-/// Matches container inventory contents against optional item filters.
-pub struct ContainerPredicate<'a> {
-    items: Option<CollectionPredicate<ItemPredicate<'a>>>,
-}
-
-impl SingleComponentItemPredicate for ContainerPredicate<'_> {
-    type Component = ContainerImpl;
-    fn matches_type(&self, content: &ContainerImpl) -> bool {
-        self.items
-            .as_ref()
-            .is_none_or(|items| items.test(content.items.iter().map(|(_, item)| item)))
-    }
-}
-
-/// Matches item durability and damage against bounds.
-pub struct DamagePredicate {
-    durability: IntBounds,
-    damage: IntBounds,
-}
-
-impl DataComponentPredicate for DamagePredicate {
-    fn matches(&self, components: &ItemStack) -> bool {
-        let damage = components.get_data_component::<DamageImpl>();
-        damage.is_some_and(|damage| {
-            let max_damage = components.get_max_damage().unwrap_or(0);
-            self.durability.matches(max_damage - damage.damage)
-                && self.damage.matches(damage.damage)
-        })
-    }
-}
-
-/// Matches enchantments against a list of optional filters.
-pub struct EnchantmentsPredicate {
-    enchantments: Vec<EnchantmentPredicate>,
-}
-impl SingleComponentItemPredicate for EnchantmentsPredicate {
-    type Component = EnchantmentsImpl;
-
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        for enchantment in &self.enchantments {
-            if !enchantment.contained_in(value) {
-                return false;
+    fn test(&self, item: &Self::Item) -> bool {
+        match self {
+            Self::AnyValue(data_component) => item.get_data_component_dyn(data_component).is_some(),
+            Self::AttributeModifiers(modifiers) => {
+                let attributes = item.get_data_component::<AttributeModifiersImpl>();
+                attributes.is_some_and(|attributes| {
+                    modifiers.as_ref().is_none_or(|modifiers| {
+                        modifiers.test(attributes.attribute_modifiers.iter())
+                    })
+                })
             }
+            Self::Bundle(items) => {
+                let content = item.get_data_component::<BundleContentsImpl>();
+                content.is_some_and(|content| {
+                    items
+                        .as_ref()
+                        .is_none_or(|items| items.test(content.items.iter()))
+                })
+            }
+            Self::Container(items) => {
+                let content = item.get_data_component::<ContainerImpl>();
+                content.is_some_and(|content| {
+                    items
+                        .as_ref()
+                        .is_none_or(|items| items.test(content.items.iter().map(|(_, item)| item)))
+                })
+            }
+            Self::Damage { durability, damage } => {
+                let dmg = item.get_data_component::<crate::data_component_impl::DamageImpl>();
+                dmg.is_some_and(|d| {
+                    let max_damage = item.get_max_damage().unwrap_or(0);
+                    durability.matches(max_damage - d.damage) && damage.matches(d.damage)
+                })
+            }
+            Self::Enchantments(enchantments) => {
+                let ench =
+                    item.get_data_component::<crate::data_component_impl::EnchantmentsImpl>();
+                ench.is_some_and(|value| {
+                    for enchantment in enchantments {
+                        if !enchantment.contained_in(value) {
+                            return false;
+                        }
+                    }
+                    true
+                })
+            }
+            Self::FireworkExplosion(pred) => {
+                let expl =
+                    item.get_data_component::<crate::data_component_impl::FireworkExplosionImpl>();
+                expl.is_some_and(|v| pred.test(v))
+            }
+            Self::Fireworks {
+                explosions,
+                flight_duration,
+            } => {
+                let fw = item.get_data_component::<crate::data_component_impl::FireworksImpl>();
+                fw.is_some_and(|v| {
+                    explosions
+                        .as_ref()
+                        .is_none_or(|p| p.test(v.explosions.iter()))
+                        && flight_duration.matches(v.flight_duration)
+                })
+            }
+            Self::JukeboxPlayable(song) => {
+                let jb =
+                    item.get_data_component::<crate::data_component_impl::JukeboxPlayableImpl>();
+                jb.is_some_and(|v| {
+                    song.as_ref()
+                        .is_none_or(|song| song.iter().any(|j| j.to_name() == v.song))
+                })
+            }
+            Self::Potions(potions) => {
+                let pc =
+                    item.get_data_component::<crate::data_component_impl::PotionContentsImpl>();
+                pc.is_some_and(|v| {
+                    !v.potion_id
+                        .is_some_and(|potion| potions.iter().any(|p| p.id == potion as u8))
+                })
+            }
+            Self::Trim {
+                material: _,
+                pattern: _,
+            } => {
+                // TODO: provide meaningful trim checks once TrimImpl types are available
+                let _ = item.get_data_component::<crate::data_component_impl::TrimImpl>();
+                false
+            }
+            Self::VillagerType(names) => {
+                let vv =
+                    item.get_data_component::<crate::data_component_impl::VillagerVariantImpl>();
+                vv.is_some_and(|v| names.contains(&v.value.as_ref()))
+            }
+            Self::WritableBook(pages) => {
+                let wb = item
+                    .get_data_component::<crate::data_component_impl::WritableBookContentImpl>();
+                wb.is_some_and(|v| pages.as_ref().is_none_or(|p| p.test(v.pages.iter())))
+            }
+            Self::WrittenBook {
+                pages,
+                author,
+                title,
+                generation,
+                resolved,
+            } => {
+                let wb =
+                    item.get_data_component::<crate::data_component_impl::WrittenBookContentImpl>();
+                wb.is_some_and(|v| {
+                    author.as_deref().is_none_or(|a| a == v.author)
+                        && title.as_deref().is_none_or(|t| t == v.title)
+                        && generation.matches(v.generation)
+                        && resolved.is_none_or(|r| r == v.resolved)
+                        && pages.as_ref().is_none_or(|p| p.test(v.pages.iter()))
+                })
+            }
+            Self::CustomData(nbt) => nbt.matches_item(item),
         }
-        true
-    }
-}
-
-/// Matches a single firework explosion's properties.
-struct FireworkExplosionPredicate(FireworkPredicate);
-
-impl SingleComponentItemPredicate for FireworkExplosionPredicate {
-    type Component = FireworkExplosionImpl;
-
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        self.0.test(value)
-    }
-}
-
-/// Matches a fireworks item with explosions and flight duration.
-struct FireworksPredicate {
-    explosions: Option<CollectionPredicate<FireworkPredicate>>,
-    flight_duration: IntBounds,
-}
-
-impl SingleComponentItemPredicate for FireworksPredicate {
-    type Component = FireworksImpl;
-
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        self.explosions
-            .as_ref()
-            .is_none_or(|p| p.test(value.explosions.iter()))
-            && self.flight_duration.matches(value.flight_duration)
-    }
-}
-
-/// Matches a jukebox playable disc by song.
-struct JukeboxPlayablePredicate {
-    song: Option<Vec<&'static JukeboxSong>>,
-}
-
-impl SingleComponentItemPredicate for JukeboxPlayablePredicate {
-    type Component = JukeboxPlayableImpl;
-
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        self.song
-            .as_ref()
-            .is_none_or(|song| song.iter().any(|j| j.to_name() == value.song))
-    }
-}
-
-/// Matches potion type against optional potion list.
-struct PotionsPredicate {
-    potions: Vec<&'static Potion>,
-}
-
-impl SingleComponentItemPredicate for PotionsPredicate {
-    type Component = PotionContentsImpl;
-
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        !value
-            .potion_id
-            .is_some_and(|potion| self.potions.iter().any(|p| p.id == potion as u8))
-    }
-}
-
-/// Matches armor trim material and pattern (TODO: needs TrimMaterial/TrimPattern types).
-struct TrimPredicate {
-    material: Option<Vec<&'static str>>,
-    pattern: Option<Vec<&'static str>>,
-}
-
-impl SingleComponentItemPredicate for TrimPredicate {
-    type Component = TrimImpl;
-    fn matches_type(&self, _value: &Self::Component) -> bool {
-        false // TODO
-    }
-}
-
-/// Matches villager type by variant name.
-struct VillagerTypePredicate {
-    villager_types: Vec<&'static str>,
-}
-
-impl SingleComponentItemPredicate for VillagerTypePredicate {
-    type Component = VillagerVariantImpl;
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        self.villager_types.contains(&value.value.as_ref())
-    }
-}
-
-/// Matches a page string in a writable book.
-struct StringPagePredicate(String);
-impl Predicate for StringPagePredicate {
-    type Item = String;
-    fn test(&self, value: &String) -> bool {
-        value == &self.0
-    }
-}
-
-/// Matches writable book pages against optional page filters.
-struct WritableBookPredicate {
-    pages: Option<CollectionPredicate<StringPagePredicate>>,
-}
-
-impl SingleComponentItemPredicate for WritableBookPredicate {
-    type Component = WritableBookContentImpl;
-
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        self.pages
-            .as_ref()
-            .is_none_or(|pages| pages.test(value.pages.iter()))
-    }
-}
-
-/// Matches a text component page in a written book.
-struct ComponentPagePredicate(TextComponent);
-impl Predicate for ComponentPagePredicate {
-    type Item = TextComponent;
-    fn test(&self, component: &TextComponent) -> bool {
-        component == &self.0
-    }
-}
-
-/// Matches written book metadata (author, title, generation) and pages.
-struct WrittenBookPredicate {
-    pages: Option<CollectionPredicate<ComponentPagePredicate>>,
-    author: Option<String>,
-    title: Option<String>,
-    generation: IntBounds,
-    resolved: Option<bool>,
-}
-
-impl SingleComponentItemPredicate for WrittenBookPredicate {
-    type Component = WrittenBookContentImpl;
-    fn matches_type(&self, value: &Self::Component) -> bool {
-        self.author.as_deref().is_none_or(|a| a == value.author)
-            && self.title.as_deref().is_none_or(|t| t == value.title)
-            && self.generation.matches(value.generation)
-            && self.resolved.is_none_or(|r| r == value.resolved)
-            && self
-                .pages
-                .as_ref()
-                .is_none_or(|p| p.test(value.pages.iter()))
-    }
-}
-
-/// Matches item NBT custom data.
-struct CustomDataPredicate(NbtPredicate);
-impl DataComponentPredicate for CustomDataPredicate {
-    fn matches(&self, item: &ItemStack) -> bool {
-        self.0.matches_item(item)
     }
 }
 
@@ -256,42 +173,28 @@ impl DataComponentPredicate for CustomDataPredicate {
 mod tests {
     use super::*;
     use crate::item::Item;
+    use crate::predicate::stored_predicate;
 
     #[test]
     fn any_value_matches_component_presence() {
         let item = ItemStack::new(1, &Item::STONE);
-        let predicate = AnyValue(DamageImpl { damage: 0 });
+        let sword = ItemStack::new(2, &Item::DIAMOND_SWORD);
+        let predicate = DataComponentPredicate::AnyValue(DataComponent::Damage);
 
         // Stone doesn't have damage by default
-        assert!(!predicate.matches(&item));
+        assert!(!predicate.test(&item));
+        assert!(predicate.test(&sword));
     }
 
     #[test]
     fn damage_predicate_checks_durability_and_damage() {
         let mut item = ItemStack::new(1, &Item::DIAMOND_PICKAXE);
-        let predicate = DamagePredicate {
+        let predicate = DataComponentPredicate::Damage {
             durability: IntBounds::new(0, 100),
             damage: IntBounds::new(0, 50),
         };
 
         // Item with no damage component shouldn't match
-        assert!(!predicate.matches(&item));
-    }
-
-    #[test]
-    fn string_page_predicate_tests_equality() {
-        let page = StringPagePredicate("Hello, world!".to_string());
-        assert!(page.test(&"Hello, world!".to_string()));
-        assert!(!page.test(&"Goodbye!".to_string()));
-    }
-
-    #[test]
-    fn component_page_predicate_tests_text_component_equality() {
-        use pumpkin_util::text::TextComponent;
-        let component = TextComponent::text("Test page");
-        let page = ComponentPagePredicate(component.clone());
-
-        assert!(page.test(&component));
-        assert!(!page.test(&TextComponent::text("Different")));
+        assert!(!predicate.test(&item));
     }
 }
