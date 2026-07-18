@@ -3,11 +3,10 @@
 //!
 //! The module keeps the building blocks generic so the same logic can be
 //! reused across different predicate types without a lot of boilerplate.
-use pumpkin_data::data_component_impl::DataComponentImpl;
-use pumpkin_data::item_stack::ItemStack;
+use crate::data_component_impl::DataComponentImpl;
+use crate::item_stack::ItemStack;
 use pumpkin_util::math::bounds::IntBounds;
 use std::marker::PhantomData;
-use wasmtime::component::__internal::wasmtime_environ::object::ReadCacheOps;
 
 pub mod custom_predicate;
 pub mod data_components;

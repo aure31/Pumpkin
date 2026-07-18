@@ -48,9 +48,11 @@ default = [
     "placed_feature",
     "configured_feature",
     "slot_ranges",
-    "bedrock_creative"
+    "bedrock_creative",
+    "predicate"
 ]
 
+predicate = []
 advancement = []
 bedrock_creative = []
 item = []
@@ -112,7 +114,7 @@ potion_brewing = []
 phf = { workspace = true, features = ["macros"] }
 pumpkin-util.workspace = true
 pumpkin-nbt.workspace = true
-serde = {workspace = true, features = ["rc"]}
+serde = { workspace = true, features = ["rc"] }
 crc-fast.workspace = true
 rand.workspace = true
 

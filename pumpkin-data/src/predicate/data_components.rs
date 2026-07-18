@@ -3,6 +3,15 @@
 //! Each struct here validates one or more component fields (damage, enchantments,
 //! book content, etc.) using the lower-level predicates from `custom_predicate`.
 
+use crate::data_component_impl::{
+    AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, DamageImpl, DataComponentImpl,
+    EnchantmentsImpl, FireworkExplosionImpl, FireworksImpl, JukeboxPlayableImpl,
+    PotionContentsImpl, TrimImpl, VillagerVariantImpl, WritableBookContentImpl,
+    WrittenBookContentImpl,
+};
+use crate::item_stack::ItemStack;
+use crate::jukebox_song::JukeboxSong;
+use crate::potion::Potion;
 use crate::predicate::custom_predicate::{
     EnchantmentPredicate, FireworkPredicate, ModifierPredicate, NbtPredicate,
 };
@@ -10,15 +19,6 @@ use crate::predicate::item_predicate::ItemPredicate;
 use crate::predicate::{
     CollectionPredicate, DataComponentPredicate, Predicate, SingleComponentItemPredicate,
 };
-use pumpkin_data::data_component_impl::{
-    AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, DamageImpl, DataComponentImpl,
-    EnchantmentsImpl, FireworkExplosionImpl, FireworksImpl, JukeboxPlayableImpl,
-    PotionContentsImpl, TrimImpl, VillagerVariantImpl, WritableBookContentImpl,
-    WrittenBookContentImpl,
-};
-use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::jukebox_song::JukeboxSong;
-use pumpkin_data::potion::Potion;
 use pumpkin_util::math::bounds::IntBounds;
 use pumpkin_util::text::TextComponent;
 
@@ -255,10 +255,11 @@ impl DataComponentPredicate for CustomDataPredicate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::item::Item;
 
     #[test]
     fn any_value_matches_component_presence() {
-        let item = ItemStack::new(1, &pumpkin_data::item::Item::STONE);
+        let item = ItemStack::new(1, &Item::STONE);
         let predicate = AnyValue(DamageImpl { damage: 0 });
 
         // Stone doesn't have damage by default
@@ -267,7 +268,7 @@ mod tests {
 
     #[test]
     fn damage_predicate_checks_durability_and_damage() {
-        let mut item = ItemStack::new(1, &pumpkin_data::item::Item::DIAMOND_PICKAXE);
+        let mut item = ItemStack::new(1, &Item::DIAMOND_PICKAXE);
         let predicate = DamagePredicate {
             durability: IntBounds::new(0, 100),
             damage: IntBounds::new(0, 50),

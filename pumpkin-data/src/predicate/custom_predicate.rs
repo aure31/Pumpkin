@@ -2,16 +2,14 @@
 //!
 //! The helpers stay fairly small so they can be combined from higher-level
 //! predicate builders without duplicating the matching logic.
-
-use crate::entity::NBTStorage;
-use crate::predicate::Predicate;
-use pumpkin_data::attributes::Attributes;
-use pumpkin_data::data_component_impl::{
+use crate::attributes::Attributes;
+use crate::data_component_impl::{
     CustomDataImpl, EnchantmentsImpl, FireworkExplosionImpl, FireworkExplosionShape, Modifier,
     Operation,
 };
-use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::{AttributeModifierSlot, Enchantment};
+use crate::item_stack::ItemStack;
+use crate::predicate::Predicate;
+use crate::{AttributeModifierSlot, Enchantment};
 use pumpkin_nbt::NbtCompound;
 use pumpkin_util::math::bounds::{DoubleBounds, IntBounds};
 
@@ -106,13 +104,6 @@ impl Predicate for FireworkPredicate {
 pub struct NbtPredicate(NbtCompound);
 
 impl NbtPredicate {
-    /// Checks the serialized NBT of a storage target.
-    pub async fn matches_storage(&self, storage: &dyn NBTStorage) -> bool {
-        let mut output = NbtCompound::new();
-        storage.write_nbt(&mut output).await;
-        self.0 == output
-    }
-
     #[must_use]
     /// Checks the custom data component stored on an item.
     pub fn matches_item(&self, item: &ItemStack) -> bool {
@@ -124,11 +115,10 @@ impl NbtPredicate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::NbtFuture;
-    use pumpkin_data::data_component::DataComponent;
-    use pumpkin_data::data_component_impl::CustomDataImpl;
-    use pumpkin_data::item::Item;
-    use pumpkin_data::item_stack::ItemStack;
+    use crate::data_component::DataComponent;
+    use crate::data_component_impl::CustomDataImpl;
+    use crate::item::Item;
+    use crate::item_stack::ItemStack;
     use pumpkin_nbt::compound::NbtCompound;
     use pumpkin_util::math::bounds::{DoubleBounds, IntBounds};
     use std::borrow::Cow;
@@ -210,32 +200,5 @@ mod tests {
         );
 
         assert!(predicate.matches_item(&item));
-    }
-
-    struct TestStorage {
-        data: NbtCompound,
-    }
-
-    impl NBTStorage for TestStorage {
-        fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-            Box::pin(async move {
-                *nbt = self.data.clone();
-            })
-        }
-
-        fn read_nbt_non_mut<'a>(&'a self, _nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-            Box::pin(async {})
-        }
-    }
-
-    #[tokio::test]
-    async fn nbt_predicate_matches_storage() {
-        let mut data = NbtCompound::new();
-        data.put_int("age", 12);
-
-        let predicate = NbtPredicate(data.clone());
-        let storage = TestStorage { data };
-
-        assert!(predicate.matches_storage(&storage).await);
     }
 }

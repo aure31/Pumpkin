@@ -2,11 +2,11 @@
 //!
 //! Combines item identity checks with component matchers to validate
 //! whether an item stack satisfies all predicates.
-
+#![allow(clippy::disallowed_types)]
+use crate::data_component_impl::DataComponentImpl;
+use crate::item::Item;
+use crate::item_stack::ItemStack;
 use crate::predicate::{DataComponentPredicate, Predicate};
-use pumpkin_data::data_component_impl::DataComponentImpl;
-use pumpkin_data::item::Item;
-use pumpkin_data::item_stack::ItemStack;
 use pumpkin_util::math::bounds::IntBounds;
 use std::collections::HashMap;
 
@@ -76,11 +76,11 @@ mod tests {
 
     #[test]
     fn item_predicate_matches_item_type() {
-        let stone_stack = ItemStack::new(1, &pumpkin_data::item::Item::STONE);
-        let dirt_stack = ItemStack::new(1, &pumpkin_data::item::Item::DIRT);
+        let stone_stack = ItemStack::new(1, &Item::STONE);
+        let dirt_stack = ItemStack::new(1, &Item::DIRT);
 
         let predicate = ItemPredicate {
-            items: Some(vec![&pumpkin_data::item::Item::STONE]),
+            items: Some(vec![&Item::STONE]),
             count: IntBounds::new(1, 64),
             components: DataComponentMatcher {
                 exact: DataComponentExactPredicate {
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn item_predicate_matches_count_bounds() {
-        let item_stack = ItemStack::new(32, &pumpkin_data::item::Item::STONE);
+        let item_stack = ItemStack::new(32, &Item::STONE);
 
         let predicate = ItemPredicate {
             items: None,
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn item_predicate_rejects_out_of_bounds_count() {
-        let item_stack = ItemStack::new(1, &pumpkin_data::item::Item::STONE);
+        let item_stack = ItemStack::new(1, &Item::STONE);
 
         let predicate = ItemPredicate {
             items: None,
@@ -135,7 +135,7 @@ mod tests {
         let predicate = DataComponentExactPredicate {
             expected_components: vec![],
         };
-        let item_stack = ItemStack::new(1, &pumpkin_data::item::Item::STONE);
+        let item_stack = ItemStack::new(1, &Item::STONE);
 
         // Empty expected components should match any item
         assert!(predicate.test(&item_stack));

@@ -47,7 +47,6 @@ pub mod item;
 pub mod logging;
 pub mod net;
 pub mod plugin;
-pub mod predicate;
 pub mod server;
 pub mod world;
 
