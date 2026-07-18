@@ -338,9 +338,9 @@ mod tests {
 
     #[test]
     fn stored_predicate_test() {
-        let page = stored_predicate(PartialEq::eq, "Hello, world!".to_string());
-        assert!(page.test(&"Hello, world!".to_string()));
-        assert!(!page.test(&"Goodbye!".to_string()));
+        let page = stored_predicate(PartialEq::eq, "Hello, world!");
+        assert!(page.test(&"Hello, world!"));
+        assert!(!page.test(&"Goodbye!"));
         let component = TextComponent::text("Test page");
         let page = stored_predicate(PartialEq::eq, component.clone());
 
