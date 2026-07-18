@@ -235,6 +235,8 @@ mod tests {
         CollectionPredicate, FnPredicate, Predicate, predicate, stored_predicate,
     };
     use pumpkin_util::math::bounds::IntBounds;
+    use pumpkin_util::text::TextComponent;
+
     type Fni32 = FnPredicate<fn(&i32) -> bool, i32>;
 
     #[test]
@@ -335,15 +337,10 @@ mod tests {
     }
 
     #[test]
-    fn string_page_predicate_tests_equality() {
+    fn stored_predicate_test() {
         let page = stored_predicate(PartialEq::eq, "Hello, world!".to_string());
         assert!(page.test(&"Hello, world!".to_string()));
         assert!(!page.test(&"Goodbye!".to_string()));
-    }
-
-    #[test]
-    fn component_page_predicate_tests_text_component_equality() {
-        use pumpkin_util::text::TextComponent;
         let component = TextComponent::text("Test page");
         let page = stored_predicate(PartialEq::eq, component.clone());
 
