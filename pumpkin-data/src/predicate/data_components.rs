@@ -125,8 +125,9 @@ impl Predicate for DataComponentPredicate {
                 let pc =
                     item.get_data_component::<crate::data_component_impl::PotionContentsImpl>();
                 pc.is_some_and(|v| {
-                    !v.potion_id
-                        .is_some_and(|potion| potions.iter().any(|p| p.id == potion as u8))
+                    v.potion_id
+                        .as_ref()
+                        .is_none_or(|potion| potions.iter().any(|p| p.id == *potion as u8))
                 })
             }
             Self::Trim {

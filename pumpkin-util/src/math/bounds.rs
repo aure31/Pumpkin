@@ -151,10 +151,9 @@ impl DoubleBounds {
 }
 
 #[inline]
-fn bound_double_to_option(bound: Bound<&f64>, start: bool) -> Option<f64> {
+const fn bound_double_to_option(bound: Bound<&f64>) -> Option<f64> {
     match bound {
-        Bound::Included(n) => Some(*n),
-        Bound::Excluded(n) => Some(*n + (start as i8 * 2 - 1) as f64),
+        Bound::Included(n) | Bound::Excluded(n) => Some(*n),
         Bound::Unbounded => None,
     }
 }
@@ -162,8 +161,8 @@ fn bound_double_to_option(bound: Bound<&f64>, start: bool) -> Option<f64> {
 impl<T: RangeBounds<f64>> From<T> for DoubleBounds {
     fn from(value: T) -> Self {
         Self::from_bounds(Bounds::<f64>::new(
-            bound_double_to_option(value.start_bound(), true),
-            bound_double_to_option(value.end_bound(), false),
+            bound_double_to_option(value.start_bound()),
+            bound_double_to_option(value.end_bound()),
         ))
     }
 }
@@ -196,10 +195,9 @@ impl FloatDegreeBounds {
 }
 
 #[inline]
-fn bound_float_to_option(bound: Bound<&f32>, start: bool) -> Option<f32> {
+const fn bound_float_to_option(bound: Bound<&f32>) -> Option<f32> {
     match bound {
-        Bound::Included(n) => Some(*n),
-        Bound::Excluded(n) => Some(*n + (start as i8 * 2 - 1) as f32),
+        Bound::Included(n) | Bound::Excluded(n) => Some(*n),
         Bound::Unbounded => None,
     }
 }
@@ -207,8 +205,8 @@ fn bound_float_to_option(bound: Bound<&f32>, start: bool) -> Option<f32> {
 impl<T: RangeBounds<f32>> From<T> for FloatDegreeBounds {
     fn from(value: T) -> Self {
         Self::from_bounds(Bounds::<f32>::new(
-            bound_float_to_option(value.start_bound(), true),
-            bound_float_to_option(value.end_bound(), false),
+            bound_float_to_option(value.start_bound()),
+            bound_float_to_option(value.end_bound()),
         ))
     }
 }

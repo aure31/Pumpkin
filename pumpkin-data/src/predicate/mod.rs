@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(dead_code, unused_macros)]
 //! Small predicate helpers used to describe item and collection checks.
 //!
 //! The module keeps the building blocks generic so the same logic can be
@@ -17,7 +17,6 @@ use crate::predicate::item_predicate::ItemPredicate;
 use pumpkin_util::math::bounds::IntBounds;
 use pumpkin_util::text::TextComponent;
 use std::marker::PhantomData;
-use std::path::Component;
 
 pub mod custom_predicate;
 pub mod data_components;
