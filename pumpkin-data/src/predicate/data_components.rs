@@ -1,5 +1,7 @@
 use crate::data_component::DataComponent;
-use crate::data_component_impl::{AttributeModifiersImpl, BundleContentsImpl, ContainerImpl};
+use crate::data_component_impl::{
+    AttributeModifiersImpl, BundleContentsImpl, ContainerImpl, FilterablePage, FilterableString,
+};
 use crate::item_stack::ItemStack;
 use crate::jukebox_song::JukeboxSong;
 use crate::potion::Potion;
@@ -36,11 +38,11 @@ pub enum DataComponentPredicate {
         pattern: Option<Vec<&'static str>>,
     },
     VillagerType(Vec<&'static str>),
-    WritableBook(Option<CollectionPredicate<FnStoredPredicate<String>>>),
+    WritableBook(Option<CollectionPredicate<FnStoredPredicate<FilterableString>>>),
     WrittenBook {
-        pages: Option<CollectionPredicate<FnStoredPredicate<TextComponent>>>,
+        pages: Option<CollectionPredicate<FnStoredPredicate<FilterablePage>>>,
         author: Option<String>,
-        title: Option<String>,
+        title: Option<FilterableString>,
         generation: IntBounds,
         resolved: Option<bool>,
     },
@@ -130,13 +132,11 @@ impl Predicate for DataComponentPredicate {
                         .is_none_or(|potion| potions.iter().any(|p| p.id == *potion as u8))
                 })
             }
-            Self::Trim {
-                material: _,
-                pattern: _,
-            } => {
-                // TODO: provide meaningful trim checks once TrimImpl types are available
-                let _ = item.get_data_component::<crate::data_component_impl::TrimImpl>();
-                false
+            Self::Trim { material, pattern } => {
+                item.get_data_component::<crate::data_component_impl::TrimImpl>()
+                    .is_some()
+                    && material.is_none()
+                    && pattern.is_none()
             }
             Self::VillagerType(names) => {
                 let vv =
@@ -159,7 +159,7 @@ impl Predicate for DataComponentPredicate {
                     item.get_data_component::<crate::data_component_impl::WrittenBookContentImpl>();
                 wb.is_some_and(|v| {
                     author.as_deref().is_none_or(|a| a == v.author)
-                        && title.as_deref().is_none_or(|t| t == v.title)
+                        && title.as_ref().is_none_or(|t| t == &v.title)
                         && generation.matches(v.generation)
                         && resolved.is_none_or(|r| r == v.resolved)
                         && pages.as_ref().is_none_or(|p| p.test(v.pages.iter()))

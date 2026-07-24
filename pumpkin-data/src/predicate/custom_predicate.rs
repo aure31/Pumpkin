@@ -128,7 +128,7 @@ mod tests {
         let predicate = ModifierPredicate {
             attribute: Some(vec![&Attributes::ARMOR]),
             id: Some("armor_bonus"),
-            amount: DoubleBounds::from(1.0..3.0),
+            amount: DoubleBounds::new(1.0, 3.0),
             operation: Some(Operation::AddValue),
             slot: Some(AttributeModifierSlot::Chest),
         };

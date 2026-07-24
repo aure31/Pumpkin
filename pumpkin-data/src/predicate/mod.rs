@@ -30,12 +30,12 @@ pub trait Predicate {
 }
 
 /// Wraps a plain closure or function so it can be used where a [`Predicate`] is expected.
-pub struct FnPredicate<F: Fn(&T) -> bool, T: ?Sized> {
+pub struct FnPredicate<T: ?Sized, F: Fn(&T) -> bool> {
     f: F,
     _marker: PhantomData<T>,
 }
 
-impl<F: Fn(&T) -> bool, T: 'static + ?Sized> Predicate for FnPredicate<F, T> {
+impl<T: 'static + ?Sized, F: Fn(&T) -> bool> Predicate for FnPredicate<T, F> {
     type Item = T;
     fn test(&self, item: &Self::Item) -> bool {
         (self.f)(item)
@@ -43,7 +43,7 @@ impl<F: Fn(&T) -> bool, T: 'static + ?Sized> Predicate for FnPredicate<F, T> {
 }
 
 /// Builds a [`FnPredicate`] from a closure.
-pub const fn predicate<F: Fn(&T) -> bool, T>(f: F) -> FnPredicate<F, T> {
+pub const fn predicate<T, F: Fn(&T) -> bool>(f: F) -> FnPredicate<T, F> {
     FnPredicate {
         f,
         _marker: PhantomData,
@@ -236,7 +236,7 @@ mod tests {
     use pumpkin_util::math::bounds::IntBounds;
     use pumpkin_util::text::TextComponent;
 
-    type Fni32 = FnPredicate<fn(&i32) -> bool, i32>;
+    type Fni32 = FnPredicate<i32, fn(&i32) -> bool>;
 
     #[test]
     fn collection_content_predicate() {

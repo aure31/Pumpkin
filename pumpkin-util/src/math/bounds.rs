@@ -111,8 +111,14 @@ impl IntBounds {
 #[inline]
 const fn bound_int_to_option(bound: Bound<&i32>, start: bool) -> Option<i32> {
     match bound {
-        Bound::Included(n) => Some(*n),
-        Bound::Excluded(n) => Some(*n + (start as i32) * 2 - 1),
+        Bound::Included(&n) => Some(n),
+        Bound::Excluded(&n) => {
+            if n == i32::MAX && start || n == i32::MIN && !start {
+                None
+            } else {
+                Some(n + (start as i32) * 2 - 1)
+            }
+        }
         Bound::Unbounded => None,
     }
 }
