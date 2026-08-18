@@ -1,4 +1,9 @@
+use crate::command::argument_builder::{ArgumentBuilder, command};
+use crate::command::context::command_context::CommandContext;
+use crate::command::node::dispatcher::CommandDispatcher;
+use crate::command::node::{CommandExecutor, CommandExecutorResult};
 use pumpkin_data::packet::CURRENT_MC_VERSION;
+use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::click::ClickEvent;
 use pumpkin_util::text::hover::HoverEvent;
 use pumpkin_util::text::{TextComponent, color::NamedColor};
@@ -8,12 +13,10 @@ use std::borrow::Cow;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::command::CommandResult;
-use crate::command::{CommandExecutor, CommandSender, args::ConsumedArgs, tree::CommandTree};
-
 const NAMES: [&str; 3] = ["pumpkin", "version", "ver"];
 
 const DESCRIPTION: &str = "Display information about Pumpkin.";
+const PERMISSION: &str = "pumpkin:command.pumpkin";
 
 const CACHE_DURATION: Duration = Duration::from_hours(24);
 
@@ -238,12 +241,7 @@ fn fetch_donators_hover_cached() -> TextComponent {
 
 #[expect(clippy::too_many_lines)]
 impl CommandExecutor for Executor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        _args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
+    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
         Box::pin(async move {
             let contributors = tokio::task::spawn_blocking(fetch_all_contributors_cached)
                 .await
@@ -253,7 +251,7 @@ impl CommandExecutor for Executor {
                 .map(|c| c.login.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let locale = sender.get_locale();
+            let locale = context.source.output.get_locale();
             let profile = if cfg!(debug_assertions) {
                 "debug"
             } else {
@@ -380,7 +378,7 @@ impl CommandExecutor for Executor {
                     .underlined(),
             );
 
-            sender.send_message(msg).await;
+            context.source.output.send_message(msg).await;
 
             // It makes total sense to return the number of
             // contributors as the i32 result for this command.
@@ -389,8 +387,15 @@ impl CommandExecutor for Executor {
     }
 }
 
-pub fn init_command_tree() -> CommandTree {
-    CommandTree::new(NAMES, DESCRIPTION).execute(Executor)
+pub fn register(dispatcher: &mut CommandDispatcher, registry: &mut PermissionRegistry) {
+    registry.register_permission_or_panic(Permission::new(
+        PERMISSION,
+        DESCRIPTION,
+        PermissionDefault::Allow,
+    ));
+    let id = dispatcher.register(command(NAMES[0], DESCRIPTION).executes(Executor));
+    dispatcher.register(command(NAMES[1], DESCRIPTION).redirect(id));
+    dispatcher.register(command(NAMES[2], DESCRIPTION).redirect(id));
 }
 
 #[cfg(test)]

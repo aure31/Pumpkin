@@ -4,17 +4,21 @@ use crate::command::args::bounded_num::BoundedNumArgumentConsumer;
 use crate::command::args::players::PlayersArgumentConsumer;
 use crate::command::args::resource::effect::EffectTypeArgumentConsumer;
 use crate::command::args::{Arg, ConsumedArgs, FindArgDefaultName};
+use crate::command::argument_builder::command;
 use crate::command::dispatcher::CommandError::{self, InvalidConsumption};
+use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::tree::CommandTree;
 use crate::command::tree::builder::{argument, literal};
 use crate::command::{CommandExecutor, CommandResult, CommandSender};
 use crate::entity::EntityBase;
 use pumpkin_data::potion::Effect;
+use pumpkin_util::PermissionLvl;
+use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 
-const NAMES: [&str; 1] = ["effect"];
+const NAME: &str = "effect";
 
 const DESCRIPTION: &str = "Adds or removes the status effects of players and other entities.";
-
+const PERMISSION: &str = "minecraft:command.effect";
 const ARG_CLEAR: &str = "clear";
 const ARG_GIVE: &str = "give";
 const ARG_EFFECT: &str = "effect";
@@ -255,6 +259,15 @@ impl CommandExecutor for ClearExecutor {
             }
         })
     }
+}
+
+pub fn register(dispatcher: &mut CommandDispatcher, registry: &mut PermissionRegistry) {
+    registry.register_permission_or_panic(Permission::new(
+        PERMISSION,
+        DESCRIPTION,
+        PermissionDefault::Op(PermissionLvl::Two),
+    ));
+    dispatcher.register();
 }
 
 pub fn init_command_tree() -> CommandTree {
