@@ -2,13 +2,11 @@ use crate::TextComponent;
 use crate::command::args::bool::BoolArgConsumer;
 use crate::command::args::bounded_num::BoundedNumArgumentConsumer;
 use crate::command::args::players::PlayersArgumentConsumer;
-use crate::command::args::resource::effect::EffectTypeArgumentConsumer;
-use crate::command::args::{Arg, ConsumedArgs, FindArgDefaultName};
-use crate::command::argument_builder::command;
+use crate::command::argument_builder::{ArgumentBuilder, argument, command, literal};
+use crate::command::argument_types::entity::EntityArgumentType;
+use crate::command::argument_types::resource::ResourceArgument;
 use crate::command::dispatcher::CommandError::{self, InvalidConsumption};
 use crate::command::node::dispatcher::CommandDispatcher;
-use crate::command::tree::CommandTree;
-use crate::command::tree::builder::{argument, literal};
 use crate::command::{CommandExecutor, CommandResult, CommandSender};
 use crate::entity::EntityBase;
 use pumpkin_data::potion::Effect;
@@ -267,7 +265,15 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &mut PermissionReg
         DESCRIPTION,
         PermissionDefault::Op(PermissionLvl::Two),
     ));
-    dispatcher.register();
+    dispatcher.register(
+        command(NAME, DESCRIPTION).then(
+            literal(ARG_CLEAR).then(
+                argument(ARG_TARGET, EntityArgumentType::Entities)
+                    .executes(ClearExecutor(true))
+                    .then(ARG_EFFECT, ResourceArgument(ENTITY_EFFECT)),
+            ),
+        ),
+    );
 }
 
 pub fn init_command_tree() -> CommandTree {

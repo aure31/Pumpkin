@@ -15,6 +15,7 @@ use std::iter::Iterator;
 use std::pin::Pin;
 
 pub static ENTITY_TYPE_REGISTRY: &Identifier = &Identifier::vanilla_static("entity_type");
+pub static ENTITY_TYPE_REGISTRY:
 static ERROR_UNKNOWN_RESOURCE: CommandErrorType<2> = CommandErrorType::new(
     translation::java::ARGUMENT_RESOURCE_NOT_FOUND,
     translation::java::ARGUMENT_RESOURCE_NOT_FOUND,
