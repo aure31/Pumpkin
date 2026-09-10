@@ -469,3 +469,4 @@ pub mod block_transformer;
 #[rustfmt::skip]
 #[path = "generated/trial_spawner.rs"]
 pub mod trial_spawner;
+pub mod recipe_data;

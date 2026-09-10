@@ -800,6 +800,10 @@ pub fn build() -> TokenStream {
             #(#smithing_transform_recipes),*
         ];
 
+        pub const fn crafting_recipe_from_id(){
+
+        }
+
         #[derive(Clone, Debug, Serialize)]
         pub struct SmithingTrimRecipe {
             pub template: RecipeIngredientTypes,

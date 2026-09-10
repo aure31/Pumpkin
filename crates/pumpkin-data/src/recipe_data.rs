@@ -1,7 +1,11 @@
+use std::sync::RwLock;
+use crate::recipes::{CookingRecipe, CookingRecipeType, CraftingRecipeTypes, RecipeCategoryTypes, SmithingTransformRecipe, SmithingTrimRecipe, StonecutterRecipe};
+
 use pumpkin_data::recipes::RecipeCategoryTypes;
 
 use pumpkin_data::item::Item;
 use pumpkin_data::tag::Taggable;
+use crate::recipes;
 
 #[derive(Clone, Debug)]
 pub enum OwnedRecipeIngredient {
@@ -89,3 +93,31 @@ pub enum DynamicRecipe {
     Cooking(OwnedCookingRecipeType),
     Brewing(OwnedBrewingRecipe),
 }
+
+pub struct RecipeRegistry {
+    pub crafting_recipes: &'static [CraftingRecipeTypes],
+    pub cooking_recipe: &'static [CookingRecipeType],
+    pub stone_cutting_recipe: &'static [StonecutterRecipe],
+    pub smithing_trim_recipe: &'static [SmithingTrimRecipe],
+    pub smithing_transform_recipe: &'static [SmithingTransformRecipe],
+    pub dynamic_recipe: RwLock<Vec<DynamicRecipe>>,
+}
+
+impl RecipeRegistry {
+    const fn new() -> Self {
+        RecipeRegistry {
+            crafting_recipes: recipes::RECIPES_CRAFTING,
+            cooking_recipe: recipes::RECIPES_COOKING,
+            stone_cutting_recipe: recipes::RECIPES_STONECUTTING,
+            smithing_trim_recipe: recipes::RECIPES_SMITHING_TRIM,
+            smithing_transform_recipe: recipes::RECIPES_SMITHING_TRANSFORM,
+            dynamic_recipe: RwLock::new(Vec::new()),
+        }
+    }
+
+    fn get_recipe_from_key(key:&str){
+        let crafting = recipes::
+    }
+}
+
+static RECIPES_REGISTRY : &'static RecipeRegistry = &RecipeRegistry::new();
