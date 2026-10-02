@@ -120,4 +120,4 @@ impl RecipeRegistry {
     }
 }
 
-static RECIPES_REGISTRY : &'static RecipeRegistry = &RecipeRegistry::new();
+pub static RECIPES_REGISTRY : &'static RecipeRegistry = &RecipeRegistry::new();

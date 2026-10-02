@@ -1,28 +1,18 @@
+use pumpkin_data::recipe_data::DynamicRecipe;
+use pumpkin_inventory::crafting::recipe_provider::RecipeProvider;
 use std::sync::RwLock;
 
-use pumpkin_inventory::crafting::recipe_provider::RecipeProvider;
-pub use pumpkin_protocol::codec::recipe::DynamicRecipe;
-
-pub struct RecipeManager {
-    dynamic_recipes: RwLock<Vec<DynamicRecipe>>,
-}
+pub struct RecipeManager;
 
 impl Default for RecipeManager {
     fn default() -> Self {
-        Self::new()
+        Self
     }
 }
 
 impl RecipeManager {
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            dynamic_recipes: RwLock::new(Vec::new()),
-        }
-    }
-
     pub fn add_recipe(&self, recipe: DynamicRecipe) {
-        let mut recipes = self
+        let mut recipes = RECIPE_REGISTRY
             .dynamic_recipes
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
